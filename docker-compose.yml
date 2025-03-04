@@ -1,0 +1,11 @@
+version: '3.6'
+services:
+    order:
+        image: arques/order:latest
+        container_name: order        
+        ports:
+          - 80:80
+        command: go run /app/server.go   
+        logging:
+          driver: "gcplogs"
+          

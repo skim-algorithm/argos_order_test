@@ -1,0 +1,24 @@
+# server
+server:
+  env: "live"
+
+# Postgresql
+sql:
+  url_live: "localhost" # live
+  url_dev: "localhost" # dev
+  port: 5432
+  db: "postgres"
+  db_admin: "admin"
+  id: "postgres"
+  pw: "dkznltm!4321"
+
+# Redis
+redis:
+  url: "127.0.0.1"
+  port: 6379
+
+# Slack
+slack:
+  url: "https://asia-northeast3-r-arques-alphasystem.cloudfunctions.net/send_slack"
+  live_channel: "noti-live-order"
+  dev_channel: "noti-dev-order"
