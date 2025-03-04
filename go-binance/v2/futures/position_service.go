@@ -3,6 +3,7 @@ package futures
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 )
 
 // ChangeLeverageService change user's initial leverage of specific symbol market
@@ -27,7 +28,7 @@ func (s *ChangeLeverageService) Leverage(leverage int) *ChangeLeverageService {
 // Do send request
 func (s *ChangeLeverageService) Do(ctx context.Context, opts ...RequestOption) (res *SymbolLeverage, err error) {
 	r := &request{
-		method:   "POST",
+		method:   http.MethodPost,
 		endpoint: "/fapi/v1/leverage",
 		secType:  secTypeSigned,
 	}
@@ -35,7 +36,7 @@ func (s *ChangeLeverageService) Do(ctx context.Context, opts ...RequestOption) (
 		"symbol":   s.symbol,
 		"leverage": s.leverage,
 	})
-	data, err := s.c.callAPI(ctx, r, opts...)
+	data, _, err := s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +77,7 @@ func (s *ChangeMarginTypeService) MarginType(marginType MarginType) *ChangeMargi
 // Do send request
 func (s *ChangeMarginTypeService) Do(ctx context.Context, opts ...RequestOption) (err error) {
 	r := &request{
-		method:   "POST",
+		method:   http.MethodPost,
 		endpoint: "/fapi/v1/marginType",
 		secType:  secTypeSigned,
 	}
@@ -84,7 +85,7 @@ func (s *ChangeMarginTypeService) Do(ctx context.Context, opts ...RequestOption)
 		"symbol":     s.symbol,
 		"marginType": s.marginType,
 	})
-	_, err = s.c.callAPI(ctx, r, opts...)
+	_, _, err = s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return err
 	}
@@ -118,7 +119,7 @@ func (s *UpdatePositionMarginService) Amount(amount string) *UpdatePositionMargi
 	return s
 }
 
-// Type set action type: 1: Add postion margin，2: Reduce postion margin
+// Type set action type: 1: Add position margin，2: Reduce position margin
 func (s *UpdatePositionMarginService) Type(actionType int) *UpdatePositionMarginService {
 	s.actionType = actionType
 	return s
@@ -127,7 +128,7 @@ func (s *UpdatePositionMarginService) Type(actionType int) *UpdatePositionMargin
 // Do send request
 func (s *UpdatePositionMarginService) Do(ctx context.Context, opts ...RequestOption) (err error) {
 	r := &request{
-		method:   "POST",
+		method:   http.MethodPost,
 		endpoint: "/fapi/v1/positionMargin",
 		secType:  secTypeSigned,
 	}
@@ -141,7 +142,7 @@ func (s *UpdatePositionMarginService) Do(ctx context.Context, opts ...RequestOpt
 	}
 	r.setFormParams(m)
 
-	_, err = s.c.callAPI(ctx, r, opts...)
+	_, _, err = s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return err
 	}
@@ -151,30 +152,26 @@ func (s *UpdatePositionMarginService) Do(ctx context.Context, opts ...RequestOpt
 // ChangePositionModeService change user's position mode
 type ChangePositionModeService struct {
 	c        *Client
-	dualSide string
+	dualSide bool
 }
 
 // Change user's position mode: true - Hedge Mode, false - One-way Mode
 func (s *ChangePositionModeService) DualSide(dualSide bool) *ChangePositionModeService {
-	if dualSide {
-		s.dualSide = "true"
-	} else {
-		s.dualSide = "false"
-	}
+	s.dualSide = dualSide
 	return s
 }
 
 // Do send request
 func (s *ChangePositionModeService) Do(ctx context.Context, opts ...RequestOption) (err error) {
 	r := &request{
-		method:   "POST",
+		method:   http.MethodPost,
 		endpoint: "/fapi/v1/positionSide/dual",
 		secType:  secTypeSigned,
 	}
 	r.setFormParams(params{
 		"dualSidePosition": s.dualSide,
 	})
-	_, err = s.c.callAPI(ctx, r, opts...)
+	_, _, err = s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return err
 	}
@@ -194,16 +191,75 @@ type PositionMode struct {
 // Do send request
 func (s *GetPositionModeService) Do(ctx context.Context, opts ...RequestOption) (res *PositionMode, err error) {
 	r := &request{
-		method:   "GET",
+		method:   http.MethodGet,
 		endpoint: "/fapi/v1/positionSide/dual",
 		secType:  secTypeSigned,
 	}
 	r.setFormParams(params{})
-	data, err := s.c.callAPI(ctx, r, opts...)
+	data, _, err := s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return nil, err
 	}
 	res = &PositionMode{}
+	err = json.Unmarshal(data, &res)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// ChangeMultiAssetModeService change user's multi-asset mode
+type ChangeMultiAssetModeService struct {
+	c                 *Client
+	multiAssetsMargin bool
+}
+
+// MultiAssetsMargin set multiAssetsMargin
+func (s *ChangeMultiAssetModeService) MultiAssetsMargin(multiAssetsMargin bool) *ChangeMultiAssetModeService {
+	s.multiAssetsMargin = multiAssetsMargin
+	return s
+}
+
+// Do send request
+func (s *ChangeMultiAssetModeService) Do(ctx context.Context, opts ...RequestOption) (err error) {
+	r := &request{
+		method:   http.MethodPost,
+		endpoint: "/fapi/v1/multiAssetsMargin",
+		secType:  secTypeSigned,
+	}
+	r.setFormParams(params{
+		"multiAssetsMargin": s.multiAssetsMargin,
+	})
+	_, _, err = s.c.callAPI(ctx, r, opts...)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// GetMultiAssetModeService get user's multi-asset mode
+type GetMultiAssetModeService struct {
+	c *Client
+}
+
+// Response of user's multi-asset mode
+type MultiAssetMode struct {
+	MultiAssetsMargin bool `json:"multiAssetsMargin"`
+}
+
+// Do send request
+func (s *GetMultiAssetModeService) Do(ctx context.Context, opts ...RequestOption) (res *MultiAssetMode, err error) {
+	r := &request{
+		method:   http.MethodGet,
+		endpoint: "/fapi/v1/multiAssetsMargin",
+		secType:  secTypeSigned,
+	}
+	r.setFormParams(params{})
+	data, _, err := s.c.callAPI(ctx, r, opts...)
+	if err != nil {
+		return nil, err
+	}
+	res = &MultiAssetMode{}
 	err = json.Unmarshal(data, &res)
 	if err != nil {
 		return nil, err

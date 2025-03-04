@@ -153,11 +153,12 @@ func CancelOrder(c echo.Context) error {
 
 func GetPositions(c echo.Context) error {
 	reqPosition := new(ReqCommon)
+
 	if err := c.Bind(reqPosition); err != nil {
 		return c.JSON(http.StatusBadRequest, ResErr{Error: err.Error()})
 	}
 
-	client := ex.Client(reqPosition.ExchangeAlias)
+	client := ex.Client("sungmkim1980")
 	if client == nil {
 		return c.JSON(http.StatusBadRequest, ResErr{Error: "invalid exchange alias"})
 	}

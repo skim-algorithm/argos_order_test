@@ -177,10 +177,30 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 	} else {
 		c.Logger.WithError(err).WithField("Alias", info.ExchangeAlias).Info("could not find strategy author")
 	}
+	client := binance.NewFuturesClient("", "")
+	openOrders, err := client.NewListOpenOrdersService().Symbol("BNBUSDT").
+		Do(context.Background())
+	if err == nil {
+		for _, o := range openOrders {
+			fmt.Println(o)
+		}
+	}
+
+	// 포지션 리스크 조회 서비스 생성
+	positionRiskService := client.NewGetPositionRiskService()
+	// 심볼을 지정하지 않으면 전체 포지션을 가져옴
+	positionRisks, err := positionRiskService.Do(context.Background())
+	if err != nil {
+		log.Fatalf("포지션 리스크 조회 실패: %v", err)
+	}
+	// 포지션 리스크 출력
+	for _, risk := range positionRisks {
+		fmt.Printf("심볼: %s, 포지션 양: %s\n", risk.Symbol, risk.PositionAmt)
+	}
 
 	// 바이낸스 클라이언트 생성, 서버 시간 동기화 수행
-	c.Client = binance.NewFuturesClient(c.Info.APIKey, c.Info.SecretKey)
-	c.SyncTimeOffset(true)
+	c.Client = binance.NewFuturesClient("", "")
+	c.SyncTimeOffset(false)
 
 	// 레디스 클라이언트 생성
 	c.Rds = redis.NewClient(&redis.Options{
@@ -234,6 +254,10 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 
 // Client 는 거래소의 해당 alias 클라이언트를 반환한다.
 func (e *Binance) Client(exAlias string) *BinanceClient {
+	for alias := range e.aliasClients {
+		fmt.Println("-", alias)
+	}
+
 	if c, exist := e.aliasClients[exAlias]; exist {
 		return c
 	}
@@ -679,11 +703,12 @@ func (c *BinanceClient) KeepAlive() error {
 	return nil
 }
 
+// TODO sungmkim - update codes for WsUserDataServe function
 func (c *BinanceClient) StartUserStream() error {
-	listenKey, err := c.ListenKey()
-	if err != nil {
-		return err
-	}
+	//listenKey, err := c.ListenKey()
+	//if err != nil {
+	//	return err
+	//}
 
 	// ListenKey가 expire하는 것을 막기 위해 1분 마다 keepAlive를 전송한다.
 	c.keepAliveTicker = time.NewTicker(time.Minute * 1)
@@ -693,24 +718,24 @@ func (c *BinanceClient) StartUserStream() error {
 		}
 	}()
 
-	errHandler := func(err error) {
-		c.Logger.WithError(err).Error("Stream error.")
-		// 계속 실패하면 무한 루프처럼 돌 수도..
-		c.RestartUserStream()
-	}
+	//errHandler := func(err error) {
+	//	c.Logger.WithError(err).Error("Stream error.")
+	//	// 계속 실패하면 무한 루프처럼 돌 수도..
+	//	c.RestartUserStream()
+	//}
 
 	go func() {
 		// NOTE: KeepAlive 옵션을 켜도 웹소켓이 1시간 후 만료된다. 핑퐁밖에는 안 해주는 것 같아보임.
 		binance.WebsocketKeepalive = true
 		futures.WebsocketKeepalive = true
-		doneC, stopC, err := binance.WsFutureUserDataServe(listenKey, c.messageHandler, errHandler)
-		if err != nil {
-			c.Logger.WithError(err).Error("Failed to open user data ws.")
-			return
-		}
-		c.UserDataStopC = stopC
-		<-doneC
-		c.Logger.Info("User data stream closed.")
+		//doneC, stopC, err := binance.WsUserDataServe(listenKey, c.ctx, c.messageHandler, errHandler)(listenKey, c.messageHandler, errHandler)
+		//if err != nil {
+		//	c.Logger.WithError(err).Error("Failed to open user data ws.")
+		//	return
+		//}
+		//c.UserDataStopC = stopC
+		//<-doneC
+		//c.Logger.Info("User data stream closed.")
 	}()
 
 	return nil
@@ -845,7 +870,7 @@ func (c *BinanceClient) Publish(msg interface{}) error {
 }
 
 func (c *BinanceClient) OpenOrders(symbol string) ([]*futures.Order, error) {
-	openOrders, err := c.Client.NewListOpenOrdersService().Symbol(symbol).Do(c.ctx)
+	openOrders, err := c.Client.NewListOpenOrdersService().Symbol("BTCUSDT").Do(c.ctx)
 	if err != nil {
 		c.Logger.WithError(err).WithField("timeOffset", c.timeOffset).Error()
 		return nil, err
@@ -1038,13 +1063,14 @@ func (c *BinanceClient) handleAccountUpdate(a *AccountUpdate) error {
 	return nil
 }
 
+// TODO sungmkim - update codes for NewPremiumIndexService function
 func (c *BinanceClient) GetFundingRate(symbol string) (*futures.PremiumIndex, error) {
-	res, err := c.Client.NewPremiumIndexService().Symbol(symbol).Do(c.ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return res, nil
+	//res, err := c.Client.NewPremiumIndexService().Symbol(symbol).Do(context.Background())
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	return nil, nil
 }
 
 // CloseAll은 해당 클라이언트의 모든 주문을 취소하고 포지션을 종료한다.

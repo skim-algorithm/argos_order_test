@@ -8,7 +8,7 @@ sql:
   url_dev: "localhost" # dev
   port: 5432
   db: "postgres"
-  db_admin: "admin"
+  db_admin: "postgres"
   id: "postgres"
   pw: "dkznltm!4321"
 

@@ -1,7 +1,8 @@
 ### go-binance
 
-A Golang SDK for [binance](https://www.binance.com) API.
+A Golang SDK for [binance](https://accounts.binance.com/register?ref=PGDFCE46) API.
 
+[![Telegram Chat](https://patrolavia.github.io/telegram-badge/chat.png)](https://t.me/gobinancegroup)
 [![Build Status](https://travis-ci.org/adshao/go-binance.svg?branch=master)](https://travis-ci.org/adshao/go-binance)
 [![GoDoc](https://godoc.org/github.com/adshao/go-binance?status.svg)](https://godoc.org/github.com/adshao/go-binance)
 [![Go Report Card](https://goreportcard.com/badge/github.com/adshao/go-binance)](https://goreportcard.com/report/github.com/adshao/go-binance)
@@ -13,28 +14,49 @@ For best compatibility, please use Go >= 1.8.
 
 Make sure you have read binance API document before continuing.
 
+
+## Community
+Join our growing community on Telegram to get help, or just chat!
+
+https://t.me/gobinancegroup
+
 ### API List
 
 Name | Description | Status
 ------------ | ------------ | ------------
-[rest-api.md](https://github.com/binance-exchange/binance-official-api-docs/blob/master/rest-api.md) | Details on the Rest API (/api) | <input type="checkbox" checked> Implemented
-[web-socket-streams.md](https://github.com/binance-exchange/binance-official-api-docs/blob/master/web-socket-streams.md) | Details on available streams and payloads | <input type="checkbox" checked>  Implemented
-[user-data-stream.md](https://github.com/binance-exchange/binance-official-api-docs/blob/master/user-data-stream.md) | Details on the dedicated account stream | <input type="checkbox" checked>  Implemented
-[wapi-api.md](https://github.com/binance-exchange/binance-official-api-docs/blob/master/wapi-api.md) | Details on the Withdrawal API (/wapi) | <input type="checkbox" checked>  Partially Implemented
-[margin-api.md](https://github.com/binance-exchange/binance-official-api-docs/blob/master/margin-api.md) | Details on the Margin API (/sapi) | <input type="checkbox" checked>  Implemented
-[futures-api.md](https://binance-docs.github.io/apidocs/futures/en/#general-info) | Details on the Futures API (/fapi) | <input type="checkbox" checked>  Partially Implemented
+[rest-api.md](https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md) | Details on the Rest API (/api) | <input type="checkbox" checked> Implemented
+[web-socket-streams.md](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md) | Details on available streams and payloads | <input type="checkbox" checked>  Implemented
+[user-data-stream.md](https://github.com/binance/binance-spot-api-docs/blob/master/user-data-stream.md) | Details on the dedicated account stream | <input type="checkbox" checked>  Implemented
+[margin-api.md](https://binance-docs.github.io/apidocs/spot/en) | Details on the Margin API (/sapi) | <input type="checkbox" checked>  Implemented
+[futures-api.md](https://binance-docs.github.io/apidocs/futures/en/#general-info) | Details on the Futures API (/fapi) | <input type="checkbox" checked>  Implemented
+[delivery-api.md](https://binance-docs.github.io/apidocs/delivery/en/#general-info) | Details on the Coin-M Futures API (/dapi) | <input type="checkbox" checked>  Implemented
+[options-api.md](https://binance-docs.github.io/apidocs/voptions/en/#general-info) | Details on the Options API(/eapi) | <input type="checkbox" checked>  Implemented
+
+
+If you find an unimplemented interface, please submit an issue. It's great if you can open a PR to fix it.
 
 ### Installation
 
 ```shell
-go get github.com/adshao/go-binance
+go get github.com/adshao/go-binance/v2
+```
+
+For v1 API, it has been moved to `v1` branch, please use:
+
+```shell
+go get github.com/adshao/go-binance/v1
 ```
 
 ### Importing
 
 ```golang
 import (
-    "github.com/adshao/go-binance"
+    // for spot and other interfaces contained in https://binance-docs.github.io/apidocs/spot/en/#change-log
+    "github.com/adshao/go-binance/v2"
+
+    "github.com/adshao/go-binance/v2/futures" // optional package
+    "github.com/adshao/go-binance/v2/delivery" // optional package
+    "github.com/adshao/go-binance/v2/options" // optional package
 )
 ```
 
@@ -54,7 +76,8 @@ var (
     secretKey = "your secret key"
 )
 client := binance.NewClient(apiKey, secretKey)
-futuresClient := binance.NewFuturesClient(apiKey, secretKey)
+futuresClient := binance.NewFuturesClient(apiKey, secretKey)    // USDT-M Futures
+deliveryClient := binance.NewDeliveryClient(apiKey, secretKey)  // Coin-M Futures
 ```
 
 A service instance stands for a REST API endpoint and is initialized by client.NewXXXService function.
@@ -62,6 +85,16 @@ A service instance stands for a REST API endpoint and is initialized by client.N
 Simply call API in chain style. Call Do() in the end to send HTTP request.
 
 Following are some simple examples, please refer to [godoc](https://godoc.org/github.com/adshao/go-binance) for full references.
+
+If you have any questions, please refer to the specific version of the code for specific reference definitions or usage methods
+
+##### Proxy Client
+
+```
+proxyUrl := "http://127.0.0.1:7890" // Please replace it with your exact proxy URL.
+client := binance.NewProxiedClient(apiKey, apiSecret, proxyUrl)
+```
+
 
 #### Create Order
 
@@ -210,6 +243,14 @@ fmt.Println(res)
 
 You don't need Client in websocket API. Just call binance.WsXxxServe(args, handler, errHandler).
 
+> For delivery API you can use `delivery.WsXxxServe(args, handler, errHandler)`.
+
+If you want to use a proxy, you can set `HTTPS_PROXY` or `HTTP_PROXY` in the environment variable, or you can call `SetWsProxyUrl` in the target packages within your code. Then you can call other websocket functions. For example:
+```golang
+binance.SetWsProxyUrl("http://127.0.0.1:7890")
+binance.WsDepthServe("LTCBTC", wsDepthHandler, errHandler)
+```
+
 #### Depth
 
 ```golang
@@ -298,3 +339,157 @@ Or you can also overwrite the `TimeOffset` yourself:
 ```golang
 client.TimeOffset = 123
 ```
+
+### Testnet
+
+You can use the testnet by enabling the corresponding flag.
+
+> Note that you can't use your regular API and Secret keys for the testnet. You have to create an account on
+> the testnet websites : [https://testnet.binancefuture.com/](https://testnet.binancefuture.com/) for futures and delivery
+> or [https://testnet.binance.vision/](https://testnet.binance.vision/) for the Spot Test Network.
+
+#### Spot
+
+Use the `binance.UseTestnet` flag before calling the client creation and the websockets methods.
+
+```go
+import (
+    "github.com/adshao/go-binance/v2"
+)
+
+binance.UseTestnet = true
+client := binance.NewClient(apiKey, secretKey)
+```
+
+#### Futures (usd(s)-m futures)
+
+Use the `futures.UseTestnet` flag before calling the client creation and the websockets methods
+
+```go
+import (
+    "github.com/adshao/go-binance/v2/futures"
+)
+
+futures.UseTestnet = true
+BinanceClient = futures.NewClient(ApiKey, SecretKey)
+```
+
+#### Delivery (coin-m futures)
+
+Use the `delivery.UseTestnet` flag before calling the client creation and the websockets methods
+
+```go
+import (
+    "github.com/adshao/go-binance/v2/delivery"
+)
+
+delivery.UseTestnet = true
+BinanceClient = delivery.NewClient(ApiKey, SecretKey)
+```
+
+#### Websocket client
+##### Order place
+##### Async write/read
+```go
+func main() {
+    orderPlaceService, _ := futures.NewOrderPlaceWsService(apiKey, secretKey)
+    
+    ctx, cancel := context.WithCancel(context.Background())
+    
+    c := make(chan os.Signal, 1)
+    signal.Notify(c, os.Interrupt)
+    go func() {
+        select {
+            case <-c:
+            cancel()
+        }
+    }()
+
+    request := futures.NewOrderPlaceWsRequest()
+    request.
+        Symbol("BTCUSDT").
+        Side(futures.SideTypeSell).
+        Type(futures.OrderTypeLimit).
+        Price("68198.00").
+        Quantity("0.002").
+        TimeInForce(futures.TimeInForceTypeGTC)
+
+    // sender
+    go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            default:
+                err := orderPlaceService.Do("id", request)
+                if err != nil {
+                    return
+                }
+            }
+        }
+    }()
+
+    wg := &sync.WaitGroup{}
+    wg.Add(1)
+    go listenOrderPlaceResponse(ctx, wg, orderPlaceService)
+    wg.Wait()
+
+    log.Println("exit")
+}
+
+func listenOrderPlaceResponse(ctx context.Context, wg *sync.WaitGroup, orderPlaceService *futures.OrderPlaceWsService) {
+    defer wg.Done()
+
+    go func() {
+        for msg := range orderPlaceService.GetReadChannel() {
+            log.Println("order place response", string(msg))
+        }
+    }()
+
+    go func() {
+        for err := range orderPlaceService.GetReadErrorChannel() {
+            log.Println("order place error", err)
+        }
+    }()
+
+    select {
+    case <-ctx.Done():
+        orderPlaceService.ReceiveAllDataBeforeStop(10 * time.Second)
+    }
+}
+```
+##### Sync write/read
+```go
+func main() {
+    orderPlaceService, _ := futures.NewOrderPlaceWsService(apiKey, secretKey)
+
+    id := "some-id"
+    request := futures.NewOrderPlaceWsRequest()
+    request.
+        Symbol("BTCUSDT").
+        Side(futures.SideTypeSell).
+        Type(futures.OrderTypeLimit).
+        Price("68198.00").
+        Quantity("0.002").
+        TimeInForce(futures.TimeInForceTypeGTC)
+
+    response, err := orderPlaceService.SyncDo(id, request)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // handle response
+}
+```
+
+## Check out some of the other packages
+
+- Check out [CCXT](https://github.com/ccxt/ccxt)  for more than 100 crypto exchanges with a unified trading API.
+- Check out [Python-Binance](https://github.com/sammchardy/python-binance) for a complete Python Wrapper.
+- Check out [Node-Binance-API] (https://github.com/carlosmiei/node-binance-api) for a node.js sdk.
+- Check out [Binance-Trade-Bot] (https://github.com/ccxt/binance-trade-bot) for a binance bot in python
+
+
+
+
+

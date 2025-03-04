@@ -3,20 +3,33 @@ package binance
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 )
 
 // GetAccountService get account info
 type GetAccountService struct {
-	c *Client
+	c                *Client
+	omitZeroBalances *bool
+}
+
+// OmitZeroBalances sets the omitZeroBalances parameter on the request.
+// When set to true, the API will return the non-zero balances of an account.
+func (s *GetAccountService) OmitZeroBalances(v bool) *GetAccountService {
+	s.omitZeroBalances = &v
+	return s
 }
 
 // Do send request
 func (s *GetAccountService) Do(ctx context.Context, opts ...RequestOption) (res *Account, err error) {
 	r := &request{
-		method:   "GET",
+		method:   http.MethodGet,
 		endpoint: "/api/v3/account",
 		secType:  secTypeSigned,
 	}
+	if s.omitZeroBalances != nil {
+		r.setParam("omitZeroBalances", *s.omitZeroBalances)
+	}
+
 	data, err := s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return nil, err
@@ -31,14 +44,19 @@ func (s *GetAccountService) Do(ctx context.Context, opts ...RequestOption) (res 
 
 // Account define account info
 type Account struct {
-	MakerCommission  int64     `json:"makerCommission"`
-	TakerCommission  int64     `json:"takerCommission"`
-	BuyerCommission  int64     `json:"buyerCommission"`
-	SellerCommission int64     `json:"sellerCommission"`
-	CanTrade         bool      `json:"canTrade"`
-	CanWithdraw      bool      `json:"canWithdraw"`
-	CanDeposit       bool      `json:"canDeposit"`
-	Balances         []Balance `json:"balances"`
+	MakerCommission  int64           `json:"makerCommission"`
+	TakerCommission  int64           `json:"takerCommission"`
+	BuyerCommission  int64           `json:"buyerCommission"`
+	SellerCommission int64           `json:"sellerCommission"`
+	CommissionRates  CommissionRates `json:"commissionRates"`
+	CanTrade         bool            `json:"canTrade"`
+	CanWithdraw      bool            `json:"canWithdraw"`
+	CanDeposit       bool            `json:"canDeposit"`
+	UpdateTime       uint64          `json:"updateTime"`
+	AccountType      string          `json:"accountType"`
+	Balances         []Balance       `json:"balances"`
+	Permissions      []string        `json:"permissions"`
+	UID              int64           `json:"uid"`
 }
 
 // Balance define user balance of your account
@@ -55,6 +73,13 @@ type GetAccountSnapshotService struct {
 	startTime   *int64
 	endTime     *int64
 	limit       *int
+}
+
+type CommissionRates struct {
+	Maker  string `json:"maker"`
+	Taker  string `json:"taker"`
+	Buyer  string `json:"buyer"`
+	Seller string `json:"seller"`
 }
 
 // Type set account type ("SPOT", "MARGIN", "FUTURES")
@@ -84,7 +109,7 @@ func (s *GetAccountSnapshotService) Limit(limit int) *GetAccountSnapshotService 
 // Do send request
 func (s *GetAccountSnapshotService) Do(ctx context.Context, opts ...RequestOption) (res *Snapshot, err error) {
 	r := &request{
-		method:   "GET",
+		method:   http.MethodGet,
 		endpoint: "/sapi/v1/accountSnapshot",
 		secType:  secTypeSigned,
 	}
@@ -169,4 +194,43 @@ type SnapshotPositions struct {
 	PositionAmt      string `json:"positionAmt"`
 	Symbol           string `json:"symbol"`
 	UnRealizedProfit string `json:"unRealizedProfit"`
+}
+
+// GetAPIKeyPermission get API Key permission info
+type GetAPIKeyPermission struct {
+	c *Client
+}
+
+// Do send request
+func (s *GetAPIKeyPermission) Do(ctx context.Context, opts ...RequestOption) (res *APIKeyPermission, err error) {
+	r := &request{
+		method:   http.MethodGet,
+		endpoint: "/sapi/v1/account/apiRestrictions",
+		secType:  secTypeSigned,
+	}
+	data, err := s.c.callAPI(ctx, r, opts...)
+	if err != nil {
+		return nil, err
+	}
+	res = new(APIKeyPermission)
+	err = json.Unmarshal(data, res)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// APIKeyPermission define API key permission
+type APIKeyPermission struct {
+	IPRestrict                     bool   `json:"ipRestrict"`
+	CreateTime                     uint64 `json:"createTime"`
+	EnableWithdrawals              bool   `json:"enableWithdrawals"`
+	EnableInternalTransfer         bool   `json:"enableInternalTransfer"`
+	PermitsUniversalTransfer       bool   `json:"permitsUniversalTransfer"`
+	EnableVanillaOptions           bool   `json:"enableVanillaOptions"`
+	EnableReading                  bool   `json:"enableReading"`
+	EnableFutures                  bool   `json:"enableFutures"`
+	EnableMargin                   bool   `json:"enableMargin"`
+	EnableSpotAndMarginTrading     bool   `json:"enableSpotAndMarginTrading"`
+	TradingAuthorityExpirationTime uint64 `json:"tradingAuthorityExpirationTime"`
 }

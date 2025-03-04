@@ -3,19 +3,19 @@ package futures
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"time"
 
-	"github.com/adshao/go-binance/v2/common"
 	"github.com/bitly/go-simplejson"
+
+	"github.com/adshao/go-binance/v2/common"
 )
 
 // SideType define side type of order
@@ -33,8 +33,15 @@ type TimeInForceType string
 // NewOrderRespType define response JSON verbosity
 type NewOrderRespType string
 
+// OrderExecutionType define order execution type
+type OrderExecutionType string
+
 // OrderStatusType define order status type
 type OrderStatusType string
+
+// PriceMatchType define priceMatch type
+// Can't be passed together with price
+type PriceMatchType string
 
 // SymbolType define symbol type
 type SymbolType string
@@ -54,6 +61,27 @@ type WorkingType string
 // MarginType define margin type
 type MarginType string
 
+// ContractType define contract type
+type ContractType string
+
+// UserDataEventType define user data event type
+type UserDataEventType string
+
+// UserDataEventReasonType define reason type for user data event
+type UserDataEventReasonType string
+
+// ForceOrderCloseType define reason type for force order
+type ForceOrderCloseType string
+
+// SelfTradePreventionMode define self trade prevention strategy
+type SelfTradePreventionMode string
+
+// Endpoints
+var (
+	BaseApiMainUrl    = "https://fapi.binance.com"
+	BaseApiTestnetUrl = "https://testnet.binancefuture.com"
+)
+
 // Global enums
 const (
 	SideTypeBuy  SideType = "BUY"
@@ -70,6 +98,7 @@ const (
 	OrderTypeTakeProfit         OrderType = "TAKE_PROFIT"
 	OrderTypeTakeProfitMarket   OrderType = "TAKE_PROFIT_MARKET"
 	OrderTypeTrailingStopMarket OrderType = "TRAILING_STOP_MARKET"
+	OrderTypeLiquidation        OrderType = "LIQUIDATION"
 
 	TimeInForceTypeGTC TimeInForceType = "GTC" // Good Till Cancel
 	TimeInForceTypeIOC TimeInForceType = "IOC" // Immediate or Cancel
@@ -79,12 +108,32 @@ const (
 	NewOrderRespTypeACK    NewOrderRespType = "ACK"
 	NewOrderRespTypeRESULT NewOrderRespType = "RESULT"
 
+	OrderExecutionTypeNew         OrderExecutionType = "NEW"
+	OrderExecutionTypePartialFill OrderExecutionType = "PARTIAL_FILL"
+	OrderExecutionTypeFill        OrderExecutionType = "FILL"
+	OrderExecutionTypeCanceled    OrderExecutionType = "CANCELED"
+	OrderExecutionTypeCalculated  OrderExecutionType = "CALCULATED"
+	OrderExecutionTypeExpired     OrderExecutionType = "EXPIRED"
+	OrderExecutionTypeTrade       OrderExecutionType = "TRADE"
+
 	OrderStatusTypeNew             OrderStatusType = "NEW"
 	OrderStatusTypePartiallyFilled OrderStatusType = "PARTIALLY_FILLED"
 	OrderStatusTypeFilled          OrderStatusType = "FILLED"
 	OrderStatusTypeCanceled        OrderStatusType = "CANCELED"
 	OrderStatusTypeRejected        OrderStatusType = "REJECTED"
 	OrderStatusTypeExpired         OrderStatusType = "EXPIRED"
+	OrderStatusTypeNewInsurance    OrderStatusType = "NEW_INSURANCE"
+	OrderStatusTypeNewADL          OrderStatusType = "NEW_ADL"
+
+	PriceMatchTypeOpponent   PriceMatchType = "OPPONENT"
+	PriceMatchTypeOpponent5  PriceMatchType = "OPPONENT_5"
+	PriceMatchTypeOpponent10 PriceMatchType = "OPPONENT_10"
+	PriceMatchTypeOpponent20 PriceMatchType = "OPPONENT_20"
+	PriceMatchTypeQueue      PriceMatchType = "QUEUE"
+	PriceMatchTypeQueue5     PriceMatchType = "QUEUE_5"
+	PriceMatchTypeQueue10    PriceMatchType = "QUEUE_10"
+	PriceMatchTypeQueue20    PriceMatchType = "QUEUE_20"
+	PriceMatchTypeNone       PriceMatchType = "NONE"
 
 	SymbolTypeFuture SymbolType = "FUTURE"
 
@@ -99,11 +148,13 @@ const (
 	SymbolStatusTypeAuctionMatch SymbolStatusType = "AUCTION_MATCH"
 	SymbolStatusTypeBreak        SymbolStatusType = "BREAK"
 
-	SymbolFilterTypeLotSize       SymbolFilterType = "LOT_SIZE"
-	SymbolFilterTypePrice         SymbolFilterType = "PRICE_FILTER"
-	SymbolFilterTypePercentPrice  SymbolFilterType = "PERCENT_PRICE"
-	SymbolFilterTypeMarketLotSize SymbolFilterType = "MARKET_LOT_SIZE"
-	SymbolFilterTypeMaxNumOrders  SymbolFilterType = "MAX_NUM_ORDERS"
+	SymbolFilterTypeLotSize          SymbolFilterType = "LOT_SIZE"
+	SymbolFilterTypePrice            SymbolFilterType = "PRICE_FILTER"
+	SymbolFilterTypePercentPrice     SymbolFilterType = "PERCENT_PRICE"
+	SymbolFilterTypeMarketLotSize    SymbolFilterType = "MARKET_LOT_SIZE"
+	SymbolFilterTypeMaxNumOrders     SymbolFilterType = "MAX_NUM_ORDERS"
+	SymbolFilterTypeMaxNumAlgoOrders SymbolFilterType = "MAX_NUM_ALGO_ORDERS"
+	SymbolFilterTypeMinNotional      SymbolFilterType = "MIN_NOTIONAL"
 
 	SideEffectTypeNoSideEffect SideEffectType = "NO_SIDE_EFFECT"
 	SideEffectTypeMarginBuy    SideEffectType = "MARGIN_BUY"
@@ -111,6 +162,40 @@ const (
 
 	MarginTypeIsolated MarginType = "ISOLATED"
 	MarginTypeCrossed  MarginType = "CROSSED"
+
+	ContractTypePerpetual      ContractType = "PERPETUAL"
+	ContractTypeCurrentQuarter ContractType = "CURRENT_QUARTER"
+	ContractTypeNextQuarter    ContractType = "NEXT_QUARTER"
+
+	UserDataEventTypeListenKeyExpired    UserDataEventType = "listenKeyExpired"
+	UserDataEventTypeMarginCall          UserDataEventType = "MARGIN_CALL"
+	UserDataEventTypeAccountUpdate       UserDataEventType = "ACCOUNT_UPDATE"
+	UserDataEventTypeOrderTradeUpdate    UserDataEventType = "ORDER_TRADE_UPDATE"
+	UserDataEventTypeAccountConfigUpdate UserDataEventType = "ACCOUNT_CONFIG_UPDATE"
+	UserDataEventTypeTradeLite           UserDataEventType = "TRADE_LITE"
+
+	UserDataEventReasonTypeDeposit             UserDataEventReasonType = "DEPOSIT"
+	UserDataEventReasonTypeWithdraw            UserDataEventReasonType = "WITHDRAW"
+	UserDataEventReasonTypeOrder               UserDataEventReasonType = "ORDER"
+	UserDataEventReasonTypeFundingFee          UserDataEventReasonType = "FUNDING_FEE"
+	UserDataEventReasonTypeWithdrawReject      UserDataEventReasonType = "WITHDRAW_REJECT"
+	UserDataEventReasonTypeAdjustment          UserDataEventReasonType = "ADJUSTMENT"
+	UserDataEventReasonTypeInsuranceClear      UserDataEventReasonType = "INSURANCE_CLEAR"
+	UserDataEventReasonTypeAdminDeposit        UserDataEventReasonType = "ADMIN_DEPOSIT"
+	UserDataEventReasonTypeAdminWithdraw       UserDataEventReasonType = "ADMIN_WITHDRAW"
+	UserDataEventReasonTypeMarginTransfer      UserDataEventReasonType = "MARGIN_TRANSFER"
+	UserDataEventReasonTypeMarginTypeChange    UserDataEventReasonType = "MARGIN_TYPE_CHANGE"
+	UserDataEventReasonTypeAssetTransfer       UserDataEventReasonType = "ASSET_TRANSFER"
+	UserDataEventReasonTypeOptionsPremiumFee   UserDataEventReasonType = "OPTIONS_PREMIUM_FEE"
+	UserDataEventReasonTypeOptionsSettleProfit UserDataEventReasonType = "OPTIONS_SETTLE_PROFIT"
+
+	ForceOrderCloseTypeLiquidation ForceOrderCloseType = "LIQUIDATION"
+	ForceOrderCloseTypeADL         ForceOrderCloseType = "ADL"
+
+	SelfTradePreventionModeNone        SelfTradePreventionMode = "NONE"
+	SelfTradePreventionModeExpireTaker SelfTradePreventionMode = "EXPIRE_TAKER"
+	SelfTradePreventionModeExpireBoth  SelfTradePreventionMode = "EXPIRE_BOTH"
+	SelfTradePreventionModeExpireMaker SelfTradePreventionMode = "EXPIRE_MAKER"
 
 	timestampKey  = "timestamp"
 	signatureKey  = "signature"
@@ -129,6 +214,14 @@ func newJSON(data []byte) (j *simplejson.Json, err error) {
 	return j, nil
 }
 
+// getApiEndpoint return the base endpoint of the WS according the UseTestnet flag
+func getApiEndpoint() string {
+	if UseTestnet {
+		return BaseApiTestnetUrl
+	}
+	return BaseApiMainUrl
+}
+
 // NewClient initialize an API client instance with API key and secret key.
 // You should always call this function before using this SDK.
 // Services will be created by the form client.NewXXXService().
@@ -136,10 +229,34 @@ func NewClient(apiKey, secretKey string) *Client {
 	return &Client{
 		APIKey:     apiKey,
 		SecretKey:  secretKey,
-		BaseURL:    "https://fapi.binance.com",
+		KeyType:    common.KeyTypeHmac,
+		BaseURL:    getApiEndpoint(),
 		UserAgent:  "Binance/golang",
 		HTTPClient: http.DefaultClient,
 		Logger:     log.New(os.Stderr, "Binance-golang ", log.LstdFlags),
+	}
+}
+
+// NewProxiedClient passing a proxy url
+func NewProxiedClient(apiKey, secretKey, proxyUrl string) *Client {
+	proxy, err := url.Parse(proxyUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tr := &http.Transport{
+		Proxy:           http.ProxyURL(proxy),
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	return &Client{
+		APIKey:    apiKey,
+		SecretKey: secretKey,
+		KeyType:   common.KeyTypeHmac,
+		BaseURL:   getApiEndpoint(),
+		UserAgent: "Binance/golang",
+		HTTPClient: &http.Client{
+			Transport: tr,
+		},
+		Logger: log.New(os.Stderr, "Binance-golang ", log.LstdFlags),
 	}
 }
 
@@ -149,6 +266,7 @@ type doFunc func(req *http.Request) (*http.Response, error)
 type Client struct {
 	APIKey     string
 	SecretKey  string
+	KeyType    string
 	BaseURL    string
 	UserAgent  string
 	HTTPClient *http.Client
@@ -185,6 +303,9 @@ func (c *Client) parseRequest(r *request, opts ...RequestOption) (err error) {
 	body := &bytes.Buffer{}
 	bodyString := r.form.Encode()
 	header := http.Header{}
+	if r.header != nil {
+		header = r.header.Clone()
+	}
 	if bodyString != "" {
 		header.Set("Content-Type", "application/x-www-form-urlencoded")
 		body = bytes.NewBufferString(bodyString)
@@ -192,16 +313,22 @@ func (c *Client) parseRequest(r *request, opts ...RequestOption) (err error) {
 	if r.secType == secTypeAPIKey || r.secType == secTypeSigned {
 		header.Set("X-MBX-APIKEY", c.APIKey)
 	}
-
+	kt := c.KeyType
+	if kt == "" {
+		kt = common.KeyTypeHmac
+	}
+	sf, err := common.SignFunc(kt)
+	if err != nil {
+		return err
+	}
 	if r.secType == secTypeSigned {
 		raw := fmt.Sprintf("%s%s", queryString, bodyString)
-		mac := hmac.New(sha256.New, []byte(c.SecretKey))
-		_, err = mac.Write([]byte(raw))
+		sign, err := sf(c.SecretKey, raw)
 		if err != nil {
 			return err
 		}
 		v := url.Values{}
-		v.Set(signatureKey, fmt.Sprintf("%x", (mac.Sum(nil))))
+		v.Set(signatureKey, *sign)
 		if queryString == "" {
 			queryString = v.Encode()
 		} else {
@@ -211,7 +338,7 @@ func (c *Client) parseRequest(r *request, opts ...RequestOption) (err error) {
 	if queryString != "" {
 		fullURL = fmt.Sprintf("%s?%s", fullURL, queryString)
 	}
-	c.debug("full url: %s, body: %s", fullURL, bodyString)
+	c.debug("full url: %s, body: %s\n", fullURL, bodyString)
 
 	r.fullURL = fullURL
 	r.header = header
@@ -219,51 +346,60 @@ func (c *Client) parseRequest(r *request, opts ...RequestOption) (err error) {
 	return nil
 }
 
-func (c *Client) callAPI(ctx context.Context, r *request, opts ...RequestOption) (data []byte, err error) {
+func (c *Client) callAPI(ctx context.Context, r *request, opts ...RequestOption) (data []byte, header *http.Header, err error) {
 	err = c.parseRequest(r, opts...)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, &http.Header{}, err
 	}
 	req, err := http.NewRequest(r.method, r.fullURL, r.body)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, &http.Header{}, err
 	}
 	req = req.WithContext(ctx)
 	req.Header = r.header
-	c.debug("request: %#v", req)
+	c.debug("request: %#v\n", req)
 	f := c.do
 	if f == nil {
 		f = c.HTTPClient.Do
 	}
 	res, err := f(req)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, &http.Header{}, err
 	}
-	data, err = ioutil.ReadAll(res.Body)
+	data, err = io.ReadAll(res.Body)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, &http.Header{}, err
 	}
 	defer func() {
 		cerr := res.Body.Close()
-		// Only overwrite the retured error if the original error was nil and an
+		// Only overwrite the returned error if the original error was nil and an
 		// error occurred while closing the body.
 		if err == nil && cerr != nil {
 			err = cerr
 		}
 	}()
-	c.debug("response: %#v", res)
-	c.debug("response body: %s", string(data))
-	c.debug("response status code: %d", res.StatusCode)
+	c.debug("response: %#v\n", res)
+	c.debug("response body: %s\n", string(data))
+	c.debug("response status code: %d\n", res.StatusCode)
 
-	if res.StatusCode >= 400 {
+	if res.StatusCode >= http.StatusBadRequest {
 		apiErr := new(common.APIError)
 		e := json.Unmarshal(data, apiErr)
 		if e != nil {
-			c.debug("failed to unmarshal json: %s", e)
+			c.debug("failed to unmarshal json: %s\n", e)
 		}
-		return nil, apiErr
+		if !apiErr.IsValid() {
+			apiErr.Response = data
+		}
+		return nil, &res.Header, apiErr
 	}
-	return data, nil
+	return data, &res.Header, nil
+}
+
+// SetApiEndpoint set api Endpoint
+func (c *Client) SetApiEndpoint(url string) *Client {
+	c.BaseURL = url
+	return c
 }
 
 // NewPingService init ping service
@@ -301,6 +437,21 @@ func (c *Client) NewKlinesService() *KlinesService {
 	return &KlinesService{c: c}
 }
 
+// NewContinuousKlinesService init continuous klines service
+func (c *Client) NewContinuousKlinesService() *ContinuousKlinesService {
+	return &ContinuousKlinesService{c: c}
+}
+
+// NewIndexPriceKlinesService init index price klines service
+func (c *Client) NewIndexPriceKlinesService() *IndexPriceKlinesService {
+	return &IndexPriceKlinesService{c: c}
+}
+
+// NewMarkPriceKlinesService init markPriceKlines service
+func (c *Client) NewMarkPriceKlinesService() *MarkPriceKlinesService {
+	return &MarkPriceKlinesService{c: c}
+}
+
 // NewListPriceChangeStatsService init list prices change stats service
 func (c *Client) NewListPriceChangeStatsService() *ListPriceChangeStatsService {
 	return &ListPriceChangeStatsService{c: c}
@@ -321,6 +472,21 @@ func (c *Client) NewCreateOrderService() *CreateOrderService {
 	return &CreateOrderService{c: c}
 }
 
+// NewModifyOrderService init creating order service
+func (c *Client) NewModifyOrderService() *ModifyOrderService {
+	return &ModifyOrderService{c: c}
+}
+
+// NewCreateBatchOrdersService init creating batch order service
+func (c *Client) NewCreateBatchOrdersService() *CreateBatchOrdersService {
+	return &CreateBatchOrdersService{c: c}
+}
+
+// NewModifyBatchOrdersService init modifying batch order service
+func (c *Client) NewModifyBatchOrdersService() *ModifyBatchOrdersService {
+	return &ModifyBatchOrdersService{c: c}
+}
+
 // NewGetOrderService init get order service
 func (c *Client) NewGetOrderService() *GetOrderService {
 	return &GetOrderService{c: c}
@@ -334,6 +500,16 @@ func (c *Client) NewCancelOrderService() *CancelOrderService {
 // NewCancelAllOpenOrdersService init cancel all open orders service
 func (c *Client) NewCancelAllOpenOrdersService() *CancelAllOpenOrdersService {
 	return &CancelAllOpenOrdersService{c: c}
+}
+
+// NewCancelMultipleOrdersService init cancel multiple orders service
+func (c *Client) NewCancelMultipleOrdersService() *CancelMultiplesOrdersService {
+	return &CancelMultiplesOrdersService{c: c}
+}
+
+// NewGetOpenOrderService init get open order service
+func (c *Client) NewGetOpenOrderService() *GetOpenOrderService {
+	return &GetOpenOrderService{c: c}
 }
 
 // NewListOpenOrdersService init list open orders service
@@ -356,9 +532,12 @@ func (c *Client) NewGetBalanceService() *GetBalanceService {
 	return &GetBalanceService{c: c}
 }
 
-// NewGetPositionRiskService init getting position risk service
 func (c *Client) NewGetPositionRiskService() *GetPositionRiskService {
 	return &GetPositionRiskService{c: c}
+}
+
+func (c *Client) NewGetPositionRiskV3Service() *GetPositionRiskV3Service {
+	return &GetPositionRiskV3Service{c: c}
 }
 
 // NewGetPositionMarginHistoryService init getting position margin history service
@@ -406,9 +585,24 @@ func (c *Client) NewPremiumIndexService() *PremiumIndexService {
 	return &PremiumIndexService{c: c}
 }
 
+// NewPremiumIndexKlinesService init premium index klines service
+func (c *Client) NewPremiumIndexKlinesService() *PremiumIndexKlinesService {
+	return &PremiumIndexKlinesService{c: c}
+}
+
 // NewFundingRateService init funding rate service
 func (c *Client) NewFundingRateService() *FundingRateService {
 	return &FundingRateService{c: c}
+}
+
+// NewFundingRateInfoService init funding rate info service
+func (c *Client) NewFundingRateInfoService() *FundingRateInfoService {
+	return &FundingRateInfoService{c: c}
+}
+
+// NewListUserLiquidationOrdersService init list user's liquidation orders service
+func (c *Client) NewListUserLiquidationOrdersService() *ListUserLiquidationOrdersService {
+	return &ListUserLiquidationOrdersService{c: c}
 }
 
 // NewListLiquidationOrdersService init funding rate service
@@ -444,4 +638,103 @@ func (c *Client) NewChangePositionModeService() *ChangePositionModeService {
 // NewGetPositionModeService init get position mode service
 func (c *Client) NewGetPositionModeService() *GetPositionModeService {
 	return &GetPositionModeService{c: c}
+}
+
+// NewChangeMultiAssetModeService init change multi-asset mode service
+func (c *Client) NewChangeMultiAssetModeService() *ChangeMultiAssetModeService {
+	return &ChangeMultiAssetModeService{c: c}
+}
+
+// NewGetMultiAssetModeService init get multi-asset mode service
+func (c *Client) NewGetMultiAssetModeService() *GetMultiAssetModeService {
+	return &GetMultiAssetModeService{c: c}
+}
+
+// NewGetRebateNewUserService init get rebate_newuser service
+func (c *Client) NewGetRebateNewUserService() *GetRebateNewUserService {
+	return &GetRebateNewUserService{c: c}
+}
+
+// NewCommissionRateService returns commission rate
+func (c *Client) NewCommissionRateService() *CommissionRateService {
+	return &CommissionRateService{c: c}
+}
+
+// NewGetOpenInterestService init open interest service
+func (c *Client) NewGetOpenInterestService() *GetOpenInterestService {
+	return &GetOpenInterestService{c: c}
+}
+
+// NewOpenInterestStatisticsService init open interest statistics service
+func (c *Client) NewOpenInterestStatisticsService() *OpenInterestStatisticsService {
+	return &OpenInterestStatisticsService{c: c}
+}
+
+// NewLongShortRatioService init open interest statistics service
+func (c *Client) NewLongShortRatioService() *LongShortRatioService {
+	return &LongShortRatioService{c: c}
+}
+
+func (c *Client) NewDeliveryPriceService() *DeliveryPriceService {
+	return &DeliveryPriceService{c: c}
+}
+
+func (c *Client) NewTopLongShortAccountRatioService() *TopLongShortAccountRatioService {
+	return &TopLongShortAccountRatioService{c: c}
+}
+
+func (c *Client) NewTopLongShortPositionRatioService() *TopLongShortPositionRatioService {
+	return &TopLongShortPositionRatioService{c: c}
+}
+
+func (c *Client) NewTakerLongShortRatioService() *TakerLongShortRatioService {
+	return &TakerLongShortRatioService{c: c}
+}
+
+func (c *Client) NewBasisService() *BasisService {
+	return &BasisService{c: c}
+}
+
+func (c *Client) NewIndexInfoService() *IndexInfoService {
+	return &IndexInfoService{c: c}
+}
+
+func (c *Client) NewAssetIndexService() *AssetIndexService {
+	return &AssetIndexService{c: c}
+}
+
+func (c *Client) NewConstituentsService() *ConstituentsService {
+	return &ConstituentsService{c: c}
+}
+
+func (c *Client) NewLvtKlinesService() *LvtKlinesService {
+	return &LvtKlinesService{c: c}
+}
+
+func (c *Client) NewGetFeeBurnService() *GetFeeBurnService {
+	return &GetFeeBurnService{c: c}
+}
+
+func (c *Client) NewFeeBurnService() *FeeBurnService {
+	return &FeeBurnService{c: c}
+}
+
+// NewListConvertAssetsService init list convert assets service
+func (c *Client) NewListConvertExchangeInfoService() *ListConvertExchangeInfoService {
+	return &ListConvertExchangeInfoService{c: c}
+}
+
+// NewCreateConvertQuoteService init create convert quote service
+func (c *Client) NewCreateConvertQuoteService() *CreateConvertQuoteService {
+	return &CreateConvertQuoteService{c: c}
+}
+
+// NewCreateConvertService init accept convert quote service
+func (c *Client) NewConvertAcceptService() *ConvertAcceptService {
+	return &ConvertAcceptService{c: c}
+}
+
+// NewGetConvertStatusService init get convert status service
+func (c *Client) NewGetConvertStatusService() *ConvertStatusService {
+	return &ConvertStatusService{c: c}
 }

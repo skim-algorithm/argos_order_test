@@ -3,6 +3,7 @@ package binance
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 )
 
 // FuturesTransferService transfer asset between spot account and futures account
@@ -34,7 +35,7 @@ func (s *FuturesTransferService) Type(transferType FuturesTransferType) *Futures
 // Do send request
 func (s *FuturesTransferService) Do(ctx context.Context, opts ...RequestOption) (res *TransactionResponse, err error) {
 	r := &request{
-		method:   "POST",
+		method:   http.MethodPost,
 		endpoint: "/sapi/v1/futures/transfer",
 		secType:  secTypeSigned,
 	}
@@ -59,7 +60,7 @@ func (s *FuturesTransferService) Do(ctx context.Context, opts ...RequestOption) 
 // ListFuturesTransferService list futures transfer
 type ListFuturesTransferService struct {
 	c         *Client
-	asset     string
+	asset     *string
 	startTime int64
 	endTime   *int64
 	current   *int64
@@ -68,7 +69,7 @@ type ListFuturesTransferService struct {
 
 // Asset set asset
 func (s *ListFuturesTransferService) Asset(asset string) *ListFuturesTransferService {
-	s.asset = asset
+	s.asset = &asset
 	return s
 }
 
@@ -99,14 +100,16 @@ func (s *ListFuturesTransferService) Size(size int64) *ListFuturesTransferServic
 // Do send request
 func (s *ListFuturesTransferService) Do(ctx context.Context, opts ...RequestOption) (res *FuturesTransferHistory, err error) {
 	r := &request{
-		method:   "GET",
+		method:   http.MethodGet,
 		endpoint: "/sapi/v1/futures/transfer",
 		secType:  secTypeSigned,
 	}
 	r.setParams(params{
-		"asset":     s.asset,
 		"startTime": s.startTime,
 	})
+	if s.asset != nil {
+		r.setParam("asset", *s.asset)
+	}
 	if s.endTime != nil {
 		r.setParam("endTime", *s.endTime)
 	}
@@ -142,4 +145,65 @@ type FuturesTransfer struct {
 	Type      int64                     `json:"type"`
 	Timestamp int64                     `json:"timestamp"`
 	Status    FuturesTransferStatusType `json:"status"`
+}
+
+type FuturesOrderBookHistoryService struct {
+	c         *Client
+	symbol    string
+	dataType  string
+	startTime int64
+	endTime   int64
+}
+
+func (s *FuturesOrderBookHistoryService) Symbol(symbol string) *FuturesOrderBookHistoryService {
+	s.symbol = symbol
+	return s
+}
+
+func (s *FuturesOrderBookHistoryService) DataType(dataType FuturesOrderBookHistoryDataType) *FuturesOrderBookHistoryService {
+	s.dataType = string(dataType)
+	return s
+}
+
+func (s *FuturesOrderBookHistoryService) StartTime(startTime int64) *FuturesOrderBookHistoryService {
+	s.startTime = startTime
+	return s
+}
+
+func (s *FuturesOrderBookHistoryService) EndTime(endTime int64) *FuturesOrderBookHistoryService {
+	s.endTime = endTime
+	return s
+}
+
+func (s *FuturesOrderBookHistoryService) Do(ctx context.Context, opts ...RequestOption) (res *FuturesOrderBookHistory, err error) {
+	r := &request{
+		method:   http.MethodGet,
+		endpoint: "/sapi/v1/futures/histDataLink",
+		secType:  secTypeSigned,
+	}
+	r.setParams(params{
+		"symbol":    s.symbol,
+		"dataType":  s.dataType,
+		"startTime": s.startTime,
+		"endTime":   s.endTime,
+	})
+	data, err := s.c.callAPI(ctx, r, opts...)
+	if err != nil {
+		return nil, err
+	}
+	res = new(FuturesOrderBookHistory)
+	err = json.Unmarshal(data, &res)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+type FuturesOrderBookHistoryItem struct {
+	Day string `json:"day"`
+	Url string `json:"url"`
+}
+
+type FuturesOrderBookHistory struct {
+	Data []*FuturesOrderBookHistoryItem `json:"data"`
 }

@@ -3,6 +3,9 @@ package futures
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+
+	"github.com/adshao/go-binance/v2/common"
 )
 
 // ExchangeInfoService exchange info service
@@ -13,11 +16,11 @@ type ExchangeInfoService struct {
 // Do send request
 func (s *ExchangeInfoService) Do(ctx context.Context, opts ...RequestOption) (res *ExchangeInfo, err error) {
 	r := &request{
-		method:   "GET",
+		method:   http.MethodGet,
 		endpoint: "/fapi/v1/exchangeInfo",
 		secType:  secTypeNone,
 	}
-	data, err := s.c.callAPI(ctx, r, opts...)
+	data, _, err := s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -50,16 +53,29 @@ type RateLimit struct {
 // Symbol market symbol
 type Symbol struct {
 	Symbol                string                   `json:"symbol"`
+	Pair                  string                   `json:"pair"`
+	ContractType          ContractType             `json:"contractType"`
+	DeliveryDate          int64                    `json:"deliveryDate"`
+	OnboardDate           int64                    `json:"onboardDate"`
 	Status                string                   `json:"status"`
 	MaintMarginPercent    string                   `json:"maintMarginPercent"`
+	RequiredMarginPercent string                   `json:"requiredMarginPercent"`
 	PricePrecision        int                      `json:"pricePrecision"`
 	QuantityPrecision     int                      `json:"quantityPrecision"`
-	RequiredMarginPercent string                   `json:"requiredMarginPercent"`
-	OrderType             []OrderType              `json:"OrderType"`
+	BaseAssetPrecision    int                      `json:"baseAssetPrecision"`
+	QuotePrecision        int                      `json:"quotePrecision"`
+	UnderlyingType        string                   `json:"underlyingType"`
+	UnderlyingSubType     []string                 `json:"underlyingSubType"`
+	SettlePlan            int64                    `json:"settlePlan"`
+	TriggerProtect        string                   `json:"triggerProtect"`
+	OrderType             []OrderType              `json:"orderType"`
 	TimeInForce           []TimeInForceType        `json:"timeInForce"`
 	Filters               []map[string]interface{} `json:"filters"`
 	QuoteAsset            string                   `json:"quoteAsset"`
+	MarginAsset           string                   `json:"marginAsset"`
 	BaseAsset             string                   `json:"baseAsset"`
+	LiquidationFee        string                   `json:"liquidationFee"`
+	MarketTakeBound       string                   `json:"marketTakeBound"`
 }
 
 // LotSizeFilter define lot size filter of symbol
@@ -78,7 +94,7 @@ type PriceFilter struct {
 
 // PercentPriceFilter define percent price filter of symbol
 type PercentPriceFilter struct {
-	MultiplierDecimal int    `json:"multiplierDecimal"`
+	MultiplierDecimal string `json:"multiplierDecimal"`
 	MultiplierUp      string `json:"multiplierUp"`
 	MultiplierDown    string `json:"multiplierDown"`
 }
@@ -93,6 +109,16 @@ type MarketLotSizeFilter struct {
 // MaxNumOrdersFilter define max num orders filter of symbol
 type MaxNumOrdersFilter struct {
 	Limit int64 `json:"limit"`
+}
+
+// MaxNumAlgoOrdersFilter define max num algo orders filter of symbol
+type MaxNumAlgoOrdersFilter struct {
+	Limit int64 `json:"limit"`
+}
+
+// MinNotionalFilter define min notional filter of symbol
+type MinNotionalFilter struct {
+	Notional string `json:"notional"`
 }
 
 // LotSizeFilter return lot size filter of symbol
@@ -141,7 +167,7 @@ func (s *Symbol) PercentPriceFilter() *PercentPriceFilter {
 		if filter["filterType"].(string) == string(SymbolFilterTypePercentPrice) {
 			f := &PercentPriceFilter{}
 			if i, ok := filter["multiplierDecimal"]; ok {
-				f.MultiplierDecimal = int(i.(float64))
+				f.MultiplierDecimal = i.(string)
 			}
 			if i, ok := filter["multiplierUp"]; ok {
 				f.MultiplierUp = i.(string)
@@ -181,7 +207,39 @@ func (s *Symbol) MaxNumOrdersFilter() *MaxNumOrdersFilter {
 		if filter["filterType"].(string) == string(SymbolFilterTypeMaxNumOrders) {
 			f := &MaxNumOrdersFilter{}
 			if i, ok := filter["limit"]; ok {
-				f.Limit = int64(i.(float64))
+				if limit, okk := common.ToInt64(i); okk == nil {
+					f.Limit = limit
+				}
+			}
+			return f
+		}
+	}
+	return nil
+}
+
+// MaxNumAlgoOrdersFilter return max num orders filter of symbol
+func (s *Symbol) MaxNumAlgoOrdersFilter() *MaxNumAlgoOrdersFilter {
+	for _, filter := range s.Filters {
+		if filter["filterType"].(string) == string(SymbolFilterTypeMaxNumAlgoOrders) {
+			f := &MaxNumAlgoOrdersFilter{}
+			if i, ok := filter["limit"]; ok {
+				if limit, okk := common.ToInt64(i); okk == nil {
+					f.Limit = limit
+				}
+			}
+			return f
+		}
+	}
+	return nil
+}
+
+// MinNotionalFilter return min notional filter of symbol
+func (s *Symbol) MinNotionalFilter() *MinNotionalFilter {
+	for _, filter := range s.Filters {
+		if filter["filterType"].(string) == string(SymbolFilterTypeMinNotional) {
+			f := &MinNotionalFilter{}
+			if i, ok := filter["notional"]; ok {
+				f.Notional = i.(string)
 			}
 			return f
 		}

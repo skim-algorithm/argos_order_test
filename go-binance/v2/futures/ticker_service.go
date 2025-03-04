@@ -3,6 +3,7 @@ package futures
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 
 	"github.com/adshao/go-binance/v2/common"
 )
@@ -22,13 +23,13 @@ func (s *ListBookTickersService) Symbol(symbol string) *ListBookTickersService {
 // Do send request
 func (s *ListBookTickersService) Do(ctx context.Context, opts ...RequestOption) (res []*BookTicker, err error) {
 	r := &request{
-		method:   "GET",
+		method:   http.MethodGet,
 		endpoint: "/fapi/v1/ticker/bookTicker",
 	}
 	if s.symbol != nil {
 		r.setParam("symbol", *s.symbol)
 	}
-	data, err := s.c.callAPI(ctx, r, opts...)
+	data, _, err := s.c.callAPI(ctx, r, opts...)
 	data = common.ToJSONList(data)
 	if err != nil {
 		return []*BookTicker{}, err
@@ -65,13 +66,13 @@ func (s *ListPricesService) Symbol(symbol string) *ListPricesService {
 // Do send request
 func (s *ListPricesService) Do(ctx context.Context, opts ...RequestOption) (res []*SymbolPrice, err error) {
 	r := &request{
-		method:   "GET",
-		endpoint: "/fapi/v1/ticker/price",
+		method:   http.MethodGet,
+		endpoint: "/fapi/v2/ticker/price",
 	}
 	if s.symbol != nil {
 		r.setParam("symbol", *s.symbol)
 	}
-	data, err := s.c.callAPI(ctx, r, opts...)
+	data, _, err := s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return []*SymbolPrice{}, err
 	}
@@ -105,13 +106,13 @@ func (s *ListPriceChangeStatsService) Symbol(symbol string) *ListPriceChangeStat
 // Do send request
 func (s *ListPriceChangeStatsService) Do(ctx context.Context, opts ...RequestOption) (res []*PriceChangeStats, err error) {
 	r := &request{
-		method:   "GET",
+		method:   http.MethodGet,
 		endpoint: "/fapi/v1/ticker/24hr",
 	}
 	if s.symbol != nil {
 		r.setParam("symbol", *s.symbol)
 	}
-	data, err := s.c.callAPI(ctx, r, opts...)
+	data, _, err := s.c.callAPI(ctx, r, opts...)
 	if err != nil {
 		return res, err
 	}
@@ -140,7 +141,7 @@ type PriceChangeStats struct {
 	QuoteVolume        string `json:"quoteVolume"`
 	OpenTime           int64  `json:"openTime"`
 	CloseTime          int64  `json:"closeTime"`
-	FristID            int64  `json:"firstId"`
+	FirstID            int64  `json:"firstId"`
 	LastID             int64  `json:"lastId"`
 	Count              int64  `json:"count"`
 }

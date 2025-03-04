@@ -3,7 +3,7 @@ package binance
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"testing"
@@ -88,7 +88,7 @@ func anyHTTPRequest() mock.AnythingOfTypeArgument {
 
 func newHTTPResponse(data []byte, statusCode int) *http.Response {
 	return &http.Response{
-		Body:       ioutil.NopCloser(bytes.NewBuffer(data)),
+		Body:       io.NopCloser(bytes.NewBuffer(data)),
 		StatusCode: statusCode,
 	}
 }
@@ -151,6 +151,7 @@ func (s *baseTestSuite) assertTradeV3Equal(e, a *TradeV3) {
 	r.Equal(e.ID, a.ID, "ID")
 	r.Equal(e.Symbol, a.Symbol, "Symbol")
 	r.Equal(e.OrderID, a.OrderID, "OrderID")
+	r.Equal(e.OrderListId, a.OrderListId, "OrderListId")
 	r.Equal(e.Price, a.Price, "Price")
 	r.Equal(e.Quantity, a.Quantity, "Quantity")
 	r.Equal(e.QuoteQuantity, a.QuoteQuantity, "QuoteQuantity")
