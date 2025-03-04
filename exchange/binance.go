@@ -199,7 +199,8 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 	}
 
 	// 바이낸스 클라이언트 생성, 서버 시간 동기화 수행
-	c.Client = binance.NewFuturesClient("", "")
+	c.Client = binance.NewFuturesClient("",
+		"")
 	c.SyncTimeOffset(false)
 
 	// 레디스 클라이언트 생성
@@ -705,10 +706,10 @@ func (c *BinanceClient) KeepAlive() error {
 
 // TODO sungmkim - update codes for WsUserDataServe function
 func (c *BinanceClient) StartUserStream() error {
-	//listenKey, err := c.ListenKey()
-	//if err != nil {
-	//	return err
-	//}
+	listenKey, err := c.ListenKey()
+	if err != nil {
+		return err
+	}
 
 	// ListenKey가 expire하는 것을 막기 위해 1분 마다 keepAlive를 전송한다.
 	c.keepAliveTicker = time.NewTicker(time.Minute * 1)
@@ -718,24 +719,33 @@ func (c *BinanceClient) StartUserStream() error {
 		}
 	}()
 
-	//errHandler := func(err error) {
-	//	c.Logger.WithError(err).Error("Stream error.")
-	//	// 계속 실패하면 무한 루프처럼 돌 수도..
-	//	c.RestartUserStream()
-	//}
+	// 웹소켓 데이터 수신 콜백 함수 정의
+	wsHandler := func(event *binance.WsUserDataEvent) {
+		if event != nil {
+			fmt.Printf("Received event: %+v\n", event)
+		}
+	}
+
+	// 에러 핸들러 정의
+	errHandler := func(err error) {
+		fmt.Printf("웹소켓 에러 발생: %v\n", err)
+	}
 
 	go func() {
+
 		// NOTE: KeepAlive 옵션을 켜도 웹소켓이 1시간 후 만료된다. 핑퐁밖에는 안 해주는 것 같아보임.
 		binance.WebsocketKeepalive = true
 		futures.WebsocketKeepalive = true
-		//doneC, stopC, err := binance.WsUserDataServe(listenKey, c.ctx, c.messageHandler, errHandler)(listenKey, c.messageHandler, errHandler)
-		//if err != nil {
-		//	c.Logger.WithError(err).Error("Failed to open user data ws.")
-		//	return
-		//}
-		//c.UserDataStopC = stopC
-		//<-doneC
-		//c.Logger.Info("User data stream closed.")
+
+		doneC, stopC, err := binance.WsUserDataServe(listenKey, wsHandler, errHandler)
+
+		if err != nil {
+			c.Logger.WithError(err).Error("Failed to open user data ws.")
+			return
+		}
+		c.UserDataStopC = stopC
+		<-doneC
+		c.Logger.Info("User data stream closed.")
 	}()
 
 	return nil
@@ -870,7 +880,7 @@ func (c *BinanceClient) Publish(msg interface{}) error {
 }
 
 func (c *BinanceClient) OpenOrders(symbol string) ([]*futures.Order, error) {
-	openOrders, err := c.Client.NewListOpenOrdersService().Symbol("BTCUSDT").Do(c.ctx)
+	openOrders, err := c.Client.NewListOpenOrdersService().Symbol(symbol).Do(c.ctx)
 	if err != nil {
 		c.Logger.WithError(err).WithField("timeOffset", c.timeOffset).Error()
 		return nil, err
@@ -1065,12 +1075,15 @@ func (c *BinanceClient) handleAccountUpdate(a *AccountUpdate) error {
 
 // TODO sungmkim - update codes for NewPremiumIndexService function
 func (c *BinanceClient) GetFundingRate(symbol string) (*futures.PremiumIndex, error) {
-	//res, err := c.Client.NewPremiumIndexService().Symbol(symbol).Do(context.Background())
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	return nil, nil
+	res, err := c.Client.NewPremiumIndexService().Symbol(symbol).Do(c.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(res) == 0 {
+		return nil, errors.New("no premium index data returned")
+	}
+	return res[0], nil
 }
 
 // CloseAll은 해당 클라이언트의 모든 주문을 취소하고 포지션을 종료한다.
