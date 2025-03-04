@@ -163,6 +163,7 @@ func New() (e *Binance) {
 }
 
 func newClient(info *model.AliasInfo) *BinanceClient {
+
 	c := &BinanceClient{
 		Info: info,
 		ctx:  context.Background(),
@@ -177,7 +178,12 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 	} else {
 		c.Logger.WithError(err).WithField("Alias", info.ExchangeAlias).Info("could not find strategy author")
 	}
-	client := binance.NewFuturesClient("", "")
+
+	apiKey := c.Info.APIKey
+	apiSecret := c.Info.SecretKey
+
+	// Sungmin : For testing
+	client := binance.NewFuturesClient(apiKey, apiSecret)
 	openOrders, err := client.NewListOpenOrdersService().Symbol("BNBUSDT").
 		Do(context.Background())
 	if err == nil {
@@ -199,8 +205,7 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 	}
 
 	// 바이낸스 클라이언트 생성, 서버 시간 동기화 수행
-	c.Client = binance.NewFuturesClient("",
-		"")
+	c.Client = binance.NewFuturesClient(apiKey, apiSecret)
 	c.SyncTimeOffset(false)
 
 	// 레디스 클라이언트 생성
