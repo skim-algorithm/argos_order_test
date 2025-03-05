@@ -276,10 +276,6 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 
 // Client 는 거래소의 해당 alias 클라이언트를 반환한다.
 func (e *Binance) Client(exAlias string) *BinanceClient {
-	for alias := range e.aliasClients {
-		fmt.Println("-", alias)
-	}
-
 	if c, exist := e.aliasClients[exAlias]; exist {
 		return c
 	}
@@ -465,7 +461,30 @@ func (c *BinanceClient) GetMaxQuantity(symbol string, isMarketOrder bool) float6
 }
 
 // NewOrder 는 새로운 주문을 요청하고 결과를 반환한다.
-func (c *BinanceClient) NewOrder(o *model.Order) (*futures.CreateOrderResponse, error) {
+func (c *BinanceClient) NewOrder(o *model.Order) ([]*futures.CreateOrderResponse, error) {
+
+	var price float64
+	{
+		// MinNotional 등을 적용하기 위해 Market 주문을 포함한 모든 주문에서 가격 정보가 필요하다.
+		ticker, err := c.GetBookTicker(o.Symbol)
+		if err != nil {
+			return nil, err
+		}
+		if o.GetSide() == futures.SideTypeBuy {
+			// 구매 주문인 경우 가격은 BestAskPrice
+			price, err = strconv.ParseFloat(ticker.AskPrice, 64)
+			if err != nil {
+				return nil, err
+			}
+		} else if o.GetSide() == futures.SideTypeSell {
+			// 판매 주문인 경우 가격은 BestBidPrice
+			price, err = strconv.ParseFloat(ticker.BidPrice, 64)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	if o.Rate > 0.0 && o.Quantity == 0.0 {
 		// Rate가 입력된 경우 RateBase에서 사용할 balance를 가져온다.
 		balance, err := c.GetRateBaseBalance(o.Symbol, o.RateBase)
@@ -474,29 +493,8 @@ func (c *BinanceClient) NewOrder(o *model.Order) (*futures.CreateOrderResponse, 
 		}
 		c.Logger.WithField(o.RateBase, balance).Info("Using balance")
 
-		var price float64
-
 		switch o.GetType() {
 		case futures.OrderTypeMarket:
-			// Market 주문인 경우 Quantity를 구하기 위해 MarketPrice가 필요하다.
-			// NOTE: 현재는 매번 API를 통해 가져온다. 웹소켓 사용 고려 필요.
-			ticker, err := c.GetBookTicker(o.Symbol)
-			if err != nil {
-				return nil, err
-			}
-			if o.GetSide() == futures.SideTypeBuy {
-				// 구매 주문인 경우 가격은 BestAskPrice
-				price, err = strconv.ParseFloat(ticker.AskPrice, 64)
-				if err != nil {
-					return nil, err
-				}
-			} else if o.GetSide() == futures.SideTypeSell {
-				// 판매 주문인 경우 가격은 BestBidPrice
-				price, err = strconv.ParseFloat(ticker.BidPrice, 64)
-				if err != nil {
-					return nil, err
-				}
-			}
 		case futures.OrderTypeStop:
 			fallthrough
 		case futures.OrderTypeStopMarket:
@@ -525,7 +523,11 @@ func (c *BinanceClient) NewOrder(o *model.Order) (*futures.CreateOrderResponse, 
 	}
 
 	orderType := o.GetType()
-	isMarketOrder := orderType == futures.OrderTypeMarket
+	isMarketOrder := (orderType == futures.OrderTypeMarket ||
+		orderType == futures.OrderTypeStopMarket ||
+		orderType == futures.OrderTypeTakeProfitMarket ||
+		orderType == futures.OrderTypeTrailingStopMarket)
+
 	qtyPrecision := c.symbolInfo[o.Symbol].QuantityPrecision
 	pricePrecision := c.symbolInfo[o.Symbol].PricePrecision
 	minQty := c.GetMinQuantity(o.Symbol, isMarketOrder)
@@ -550,13 +552,12 @@ func (c *BinanceClient) NewOrder(o *model.Order) (*futures.CreateOrderResponse, 
 
 	// res보다 웹소켓 결과가 먼저 도달하는 경우가 있어 WaitGroup을 사용해 순차적으로 실행한다.
 	c.wg.Add(1)
-	resChannel := make(chan *futures.CreateOrderResponse, 1)
+	resChannel := make(chan []*futures.CreateOrderResponse, 1)
 	errChannel := make(chan error, 1)
 	go func() {
 		defer c.wg.Done()
 
-		var res *futures.CreateOrderResponse
-		var err error
+		var responses []*futures.CreateOrderResponse
 		remainingQty := o.Quantity
 
 		for 0 < remainingQty {
@@ -564,28 +565,51 @@ func (c *BinanceClient) NewOrder(o *model.Order) (*futures.CreateOrderResponse, 
 				o.Quantity = maxQty
 				remainingQty -= maxQty
 			} else {
-				o.Quantity = math.Max(minQty, o.Quantity)
+				o.Quantity = math.Max(minQty, remainingQty)
 				remainingQty = 0
 			}
 
-			res, err = s.Do(c.ctx)
+			s = s.Quantity(common.ToString(o.Quantity, qtyPrecision))
+			res, err := s.Do(c.ctx)
 
 			// 에러 처리
 			if err != nil {
 				if errVal, ok := err.(*bcommon.APIError); ok {
-					if errVal.Code == -2021 {
-						// 에러 코드 -2021은 already trigger라는 뜻이다.
+					if errVal.Code == -2021 { // Already trigger
 						if o.GetType() == futures.OrderTypeStopMarket {
 							// StopMarket 주문에서 해당 에러가 발생했을 경우 Market 주문으로 다시 보낸다.
+							c.Logger.WithField("order", o).WithField("timeOffset", c.timeOffset).Info(errVal)
+							bakO := *o
+
 							o.Type = string(futures.OrderTypeMarket)
 							o.StopPrice = 0.0
 							// NOTE: Quantity로 주문을 했을 경우 가격이 바뀌면서 잔고가 부족할 수도 있다.
 							mRes, mErr := c.NewOrder(o)
 
-							resChannel <- mRes
-							errChannel <- mErr
-							return
+							// 다시 보낸 Market 주문에서도 에러가 발생했을 경우 종료한다.
+							if mErr != nil {
+								c.SendSlackAlert(fmt.Sprintf("[%s][%s] %s", o.ExchangeAlias, o.StrategyName, mErr.Error()))
+								resChannel <- mRes
+								errChannel <- mErr
+								return
+							}
+
+							for _, res := range mRes {
+								responses = append(responses, res)
+							}
+
+							o = &bakO
+
+							continue
 						}
+					} else if errVal.Code == -2022 { // ReduceOnly Order is rejected
+						// 이전 주문에 의해 reduce only 주문 가능한 수량이 모두 찬 경우
+						c.Logger.WithField("order", o).WithField("timeOffset", c.timeOffset).Info(errVal)
+						c.SendSlackAlert(fmt.Sprintf("[%s][%s] %s", o.ExchangeAlias, o.StrategyName, err.Error()))
+
+						resChannel <- nil
+						errChannel <- err
+						return
 					}
 				}
 
@@ -606,24 +630,24 @@ func (c *BinanceClient) NewOrder(o *model.Order) (*futures.CreateOrderResponse, 
 
 			if err := o.Insert(); err != nil {
 				c.Logger.WithError(err).WithField("order", o).Error("Failed to insert order.")
-				resChannel <- nil
-				errChannel <- err
-				return
 			}
 
-			c.Logger.WithFields(log.Fields{"order": o, "res": res, "timeOffset": c.timeOffset}).Info()
+			c.Logger.WithFields(log.Fields{"order": o, "res": responses, "timeOffset": c.timeOffset}).Info()
+			responses = append(responses, res)
+			newO := *o
+			o = &newO
 		}
 
 		// OrderResult 로그 저장은 messageHandler에서 수행
-		resChannel <- res
-		errChannel <- err
+		resChannel <- responses
+		errChannel <- nil
 	}()
 
 	// NOTE: 위에서 둘 중 하나만 전송하는 경우 데드락이 발생한다.
-	res := <-resChannel
+	responses := <-resChannel
 	err := <-errChannel
 
-	return res, err
+	return responses, err
 }
 
 func (c *BinanceClient) CancelOrder(o *model.Cancel) ([]*futures.CancelOrderResponse, error) {
@@ -713,7 +737,6 @@ func (c *BinanceClient) KeepAlive() error {
 	return nil
 }
 
-// TODO sungmkim - update codes for WsUserDataServe function
 func (c *BinanceClient) StartUserStream() error {
 	listenKey, err := c.ListenKey()
 	if err != nil {
@@ -737,11 +760,12 @@ func (c *BinanceClient) StartUserStream() error {
 
 	// 에러 핸들러 정의
 	errHandler := func(err error) {
-		fmt.Printf("웹소켓 에러 발생: %v\n", err)
+		c.Logger.WithError(err).Error("Stream error.")
+		// 계속 실패하면 무한 루프처럼 돌 수도..
+		c.RestartUserStream()
 	}
 
 	go func() {
-
 		// NOTE: KeepAlive 옵션을 켜도 웹소켓이 1시간 후 만료된다. 핑퐁밖에는 안 해주는 것 같아보임.
 		binance.WebsocketKeepalive = true
 		futures.WebsocketKeepalive = true
