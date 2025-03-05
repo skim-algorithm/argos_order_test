@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.24.0
 
 require (
-	github.com/adshao/go-binance/v2 v2.8.0
+	github.com/adshao/go-binance/v2 v2.8.1
 	github.com/go-redis/redis/v8 v8.4.2
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/lib/pq v1.9.0

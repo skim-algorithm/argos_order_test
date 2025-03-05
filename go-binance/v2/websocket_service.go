@@ -650,6 +650,17 @@ func WsUserDataServe(listenKey string, handler WsUserDataHandler, errHandler Err
 	return wsServe(cfg, wsHandler, errHandler)
 }
 
+// WsFutureUserDataServe serve user data handler with listen key
+func WsFutureUserDataServe(listenKey string, handler WsHandler, errHandler ErrHandler, wsConfig ...*WsConfig) (doneC, stopC chan struct{}, err error) {
+	baseFutureURL := ""
+	if len(wsConfig) > 0 {
+		baseFutureURL = wsConfig[0].Endpoint
+	}
+	endpoint := fmt.Sprintf("%s/%s", baseFutureURL, listenKey)
+	cfg := newWsConfig(endpoint)
+	return wsServe(cfg, handler, errHandler)
+}
+
 // WsMarketStatHandler handle websocket that push single market statistics for 24hr
 type WsMarketStatHandler func(event *WsMarketStatEvent)
 

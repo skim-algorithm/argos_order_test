@@ -40,6 +40,8 @@ type (
 		Logger          *log.Entry
 		openOrders      map[int64]*model.Order
 		positions       map[string]*Position
+		exchangeInfo    *futures.ExchangeInfo
+		symbolInfo      map[string]*futures.Symbol
 		Author          string //전략을 작성한 Author의 이름. 해당 슬랙 채널로 order 메시지를 전송한다.
 		timeOffset      int64
 		wg              sync.WaitGroup
@@ -208,6 +210,20 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 	c.Client = binance.NewFuturesClient(apiKey, apiSecret)
 	c.SyncTimeOffset(false)
 
+	// 바이낸스 ExchangeInfo 로드
+	exInfo, err := c.Client.NewExchangeInfoService().Do(c.ctx)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to load exchange info.")
+		return nil
+	}
+	c.exchangeInfo = exInfo
+
+	// ExchangeInfo에서 심볼별 정보 map으로 저장
+	c.symbolInfo = make(map[string]*futures.Symbol)
+	for i := range exInfo.Symbols {
+		symbol := exInfo.Symbols[i]
+		c.symbolInfo[symbol.Symbol] = &symbol
+	}
 	// 레디스 클라이언트 생성
 	c.Rds = redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%d", config.Get().Redis.Url, config.Get().Redis.Port),
@@ -415,32 +431,41 @@ func (c *BinanceClient) SyncTimeOffset(withLogging bool) {
 	}
 }
 
-// NewOrder 는 새로운 주문을 요청하고 결과를 반환한다.
-func (c *BinanceClient) NewOrder(o *model.Order, propertiesBySymbol map[string]*SymbolProperties) ([]*futures.CreateOrderResponse, error) {
-	symbolProps := *propertiesBySymbol[o.Symbol]
-
-	var price float64
-	{
-		// MinNotional 등을 적용하기 위해 Market 주문을 포함한 모든 주문에서 가격 정보가 필요하다.
-		ticker, err := c.GetBookTicker(o.Symbol)
-		if err != nil {
-			return nil, err
-		}
-		if o.GetSide() == futures.SideTypeBuy {
-			// 구매 주문인 경우 가격은 BestAskPrice
-			price, err = strconv.ParseFloat(ticker.AskPrice, 64)
-			if err != nil {
-				return nil, err
-			}
-		} else if o.GetSide() == futures.SideTypeSell {
-			// 판매 주문인 경우 가격은 BestBidPrice
-			price, err = strconv.ParseFloat(ticker.BidPrice, 64)
-			if err != nil {
-				return nil, err
-			}
-		}
+// GetMinQuantity 는 해당 symbol의 최소 주문 금액을 반환한다.
+func (c *BinanceClient) GetMinQuantity(symbol string, isMarketOrder bool) float64 {
+	var qtyStr string
+	if isMarketOrder {
+		qtyStr = c.symbolInfo[symbol].MarketLotSizeFilter().MinQuantity
+	} else {
+		qtyStr = c.symbolInfo[symbol].LotSizeFilter().MinQuantity
 	}
 
+	qty, err := strconv.ParseFloat(qtyStr, 64)
+	if err != nil {
+		c.Logger.WithError(err).WithField("MinQuantity", qtyStr).Error("Failed to parse MinQuantity.")
+		qty = 0.0
+	}
+	return qty
+}
+
+// GetMaxQuantity 는 해당 symbol의 최소 주문 금액을 반환한다.
+func (c *BinanceClient) GetMaxQuantity(symbol string, isMarketOrder bool) float64 {
+	var qtyStr string
+	if isMarketOrder {
+		qtyStr = c.symbolInfo[symbol].MarketLotSizeFilter().MaxQuantity
+	} else {
+		qtyStr = c.symbolInfo[symbol].LotSizeFilter().MaxQuantity
+	}
+	qty, err := strconv.ParseFloat(qtyStr, 64)
+	if err != nil {
+		c.Logger.WithError(err).WithField("MaxQuantity", qtyStr).Error("Failed to parse MaxQuantity.")
+		qty = 0.0
+	}
+	return qty
+}
+
+// NewOrder 는 새로운 주문을 요청하고 결과를 반환한다.
+func (c *BinanceClient) NewOrder(o *model.Order) (*futures.CreateOrderResponse, error) {
 	if o.Rate > 0.0 && o.Quantity == 0.0 {
 		// Rate가 입력된 경우 RateBase에서 사용할 balance를 가져온다.
 		balance, err := c.GetRateBaseBalance(o.Symbol, o.RateBase)
@@ -449,8 +474,29 @@ func (c *BinanceClient) NewOrder(o *model.Order, propertiesBySymbol map[string]*
 		}
 		c.Logger.WithField(o.RateBase, balance).Info("Using balance")
 
+		var price float64
+
 		switch o.GetType() {
 		case futures.OrderTypeMarket:
+			// Market 주문인 경우 Quantity를 구하기 위해 MarketPrice가 필요하다.
+			// NOTE: 현재는 매번 API를 통해 가져온다. 웹소켓 사용 고려 필요.
+			ticker, err := c.GetBookTicker(o.Symbol)
+			if err != nil {
+				return nil, err
+			}
+			if o.GetSide() == futures.SideTypeBuy {
+				// 구매 주문인 경우 가격은 BestAskPrice
+				price, err = strconv.ParseFloat(ticker.AskPrice, 64)
+				if err != nil {
+					return nil, err
+				}
+			} else if o.GetSide() == futures.SideTypeSell {
+				// 판매 주문인 경우 가격은 BestBidPrice
+				price, err = strconv.ParseFloat(ticker.BidPrice, 64)
+				if err != nil {
+					return nil, err
+				}
+			}
 		case futures.OrderTypeStop:
 			fallthrough
 		case futures.OrderTypeStopMarket:
@@ -479,31 +525,11 @@ func (c *BinanceClient) NewOrder(o *model.Order, propertiesBySymbol map[string]*
 	}
 
 	orderType := o.GetType()
-	isMarketOrder := (orderType == futures.OrderTypeMarket ||
-		orderType == futures.OrderTypeStopMarket ||
-		orderType == futures.OrderTypeTakeProfitMarket ||
-		orderType == futures.OrderTypeTrailingStopMarket)
-
-	stepSize := symbolProps.StepSize
-	priceTickSize := symbolProps.PriceTickSize
-	qtyPrecision := int(math.Round(math.Abs(math.Log10(stepSize))))
-	pricePrecision := int(math.Round(math.Abs(math.Log10(priceTickSize))))
-
-	var minQty, maxQty float64
-	if isMarketOrder {
-		minQty = symbolProps.MarketMinQty
-		maxQty = symbolProps.MarketMaxQty
-	} else {
-		minQty = symbolProps.MinQty
-		maxQty = symbolProps.MaxQty
-	}
-
-	if !o.ReduceOnly {
-		notionalMinQty := symbolProps.MinNotional / price
-		for minQty < notionalMinQty {
-			minQty += stepSize
-		}
-	}
+	isMarketOrder := orderType == futures.OrderTypeMarket
+	qtyPrecision := c.symbolInfo[o.Symbol].QuantityPrecision
+	pricePrecision := c.symbolInfo[o.Symbol].PricePrecision
+	minQty := c.GetMinQuantity(o.Symbol, isMarketOrder)
+	maxQty := c.GetMaxQuantity(o.Symbol, isMarketOrder)
 
 	if o.Quantity != 0.0 {
 		o.Quantity = math.Max(minQty, o.Quantity)
@@ -524,12 +550,13 @@ func (c *BinanceClient) NewOrder(o *model.Order, propertiesBySymbol map[string]*
 
 	// res보다 웹소켓 결과가 먼저 도달하는 경우가 있어 WaitGroup을 사용해 순차적으로 실행한다.
 	c.wg.Add(1)
-	resChannel := make(chan []*futures.CreateOrderResponse, 1)
+	resChannel := make(chan *futures.CreateOrderResponse, 1)
 	errChannel := make(chan error, 1)
 	go func() {
 		defer c.wg.Done()
 
-		var responses []*futures.CreateOrderResponse
+		var res *futures.CreateOrderResponse
+		var err error
 		remainingQty := o.Quantity
 
 		for 0 < remainingQty {
@@ -537,51 +564,28 @@ func (c *BinanceClient) NewOrder(o *model.Order, propertiesBySymbol map[string]*
 				o.Quantity = maxQty
 				remainingQty -= maxQty
 			} else {
-				o.Quantity = math.Max(minQty, remainingQty)
+				o.Quantity = math.Max(minQty, o.Quantity)
 				remainingQty = 0
 			}
 
-			s = s.Quantity(common.ToString(o.Quantity, qtyPrecision))
-			res, err := s.Do(c.ctx)
+			res, err = s.Do(c.ctx)
 
 			// 에러 처리
 			if err != nil {
 				if errVal, ok := err.(*bcommon.APIError); ok {
-					if errVal.Code == -2021 { // Already trigger
+					if errVal.Code == -2021 {
+						// 에러 코드 -2021은 already trigger라는 뜻이다.
 						if o.GetType() == futures.OrderTypeStopMarket {
 							// StopMarket 주문에서 해당 에러가 발생했을 경우 Market 주문으로 다시 보낸다.
-							c.Logger.WithField("order", o).WithField("timeOffset", c.timeOffset).Info(errVal)
-							bakO := *o
-
 							o.Type = string(futures.OrderTypeMarket)
 							o.StopPrice = 0.0
 							// NOTE: Quantity로 주문을 했을 경우 가격이 바뀌면서 잔고가 부족할 수도 있다.
-							mRes, mErr := c.NewOrder(o, propertiesBySymbol)
+							mRes, mErr := c.NewOrder(o)
 
-							// 다시 보낸 Market 주문에서도 에러가 발생했을 경우 종료한다.
-							if mErr != nil {
-								c.SendSlackAlert(fmt.Sprintf("[%s][%s] %s", o.ExchangeAlias, o.StrategyName, mErr.Error()))
-								resChannel <- mRes
-								errChannel <- mErr
-								return
-							}
-
-							for _, res := range mRes {
-								responses = append(responses, res)
-							}
-
-							o = &bakO
-
-							continue
+							resChannel <- mRes
+							errChannel <- mErr
+							return
 						}
-					} else if errVal.Code == -2022 { // ReduceOnly Order is rejected
-						// 이전 주문에 의해 reduce only 주문 가능한 수량이 모두 찬 경우
-						c.Logger.WithField("order", o).WithField("timeOffset", c.timeOffset).Info(errVal)
-						c.SendSlackAlert(fmt.Sprintf("[%s][%s] %s", o.ExchangeAlias, o.StrategyName, err.Error()))
-
-						resChannel <- nil
-						errChannel <- err
-						return
 					}
 				}
 
@@ -602,24 +606,24 @@ func (c *BinanceClient) NewOrder(o *model.Order, propertiesBySymbol map[string]*
 
 			if err := o.Insert(); err != nil {
 				c.Logger.WithError(err).WithField("order", o).Error("Failed to insert order.")
+				resChannel <- nil
+				errChannel <- err
+				return
 			}
 
-			c.Logger.WithFields(log.Fields{"order": o, "res": responses, "timeOffset": c.timeOffset}).Info()
-			responses = append(responses, res)
-			newO := *o
-			o = &newO
+			c.Logger.WithFields(log.Fields{"order": o, "res": res, "timeOffset": c.timeOffset}).Info()
 		}
 
 		// OrderResult 로그 저장은 messageHandler에서 수행
-		resChannel <- responses
-		errChannel <- nil
+		resChannel <- res
+		errChannel <- err
 	}()
 
 	// NOTE: 위에서 둘 중 하나만 전송하는 경우 데드락이 발생한다.
-	responses := <-resChannel
+	res := <-resChannel
 	err := <-errChannel
 
-	return responses, err
+	return res, err
 }
 
 func (c *BinanceClient) CancelOrder(o *model.Cancel) ([]*futures.CancelOrderResponse, error) {
@@ -1092,7 +1096,7 @@ func (c *BinanceClient) GetFundingRate(symbol string) (*futures.PremiumIndex, er
 }
 
 // CloseAll은 해당 클라이언트의 모든 주문을 취소하고 포지션을 종료한다.
-func (c *BinanceClient) CloseAll(propertiesBySymbol map[string]*SymbolProperties) error {
+func (c *BinanceClient) CloseAll() error {
 	c.CancelAllOrders("")
 
 	for symbol, pos := range c.positions {
@@ -1109,7 +1113,7 @@ func (c *BinanceClient) CloseAll(propertiesBySymbol map[string]*SymbolProperties
 			Type:       string(futures.OrderTypeMarket),
 			Side:       oppositeSide,
 			ReduceOnly: true,
-		}, propertiesBySymbol)
+		})
 	}
 
 	// 해당하는 클라이언트가 바로 종료되도록 메시지를 보낸다.

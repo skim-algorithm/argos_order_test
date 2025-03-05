@@ -109,16 +109,11 @@ func NewOrder(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, ResErr{Error: "invalid exchange alias"})
 	}
 
-	res, err := client.NewOrder(order, ex.PropertiesBySymbol)
+	res, err := client.NewOrder(order)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ResErr{Error: err.Error()})
 	}
-
-	if len(res) == 1 {
-		return c.JSON(http.StatusOK, res[0])
-	} else {
-		return c.JSON(http.StatusOK, res)
-	}
+	return c.JSON(http.StatusOK, res)
 }
 
 func CancelOrder(c echo.Context) error {
@@ -317,7 +312,7 @@ func CloseAll(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, ResErr{Error: "invalid exchange alias"})
 	}
 
-	err := client.CloseAll(ex.PropertiesBySymbol)
+	err := client.CloseAll()
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ResErr{Error: err.Error()})
 	}

@@ -5,7 +5,5 @@ services:
         container_name: order        
         ports:
           - 80:80
-        command: go run /app/server.go   
-        logging:
-          driver: "gcplogs"
+        command: go run /app/server.go
           
