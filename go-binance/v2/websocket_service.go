@@ -17,6 +17,7 @@ var (
 	BaseCombinedTestnetURL = "wss://testnet.binance.vision/stream?streams="
 	BaseWsApiMainURL       = "wss://ws-api.binance.com:443/ws-api/v3"
 	BaseWsApiTestnetURL    = "wss://testnet.binance.vision/ws-api/v3"
+	baseFutureURL          = "wss://fstream.binance.com/ws"
 
 	// WebsocketTimeout is an interval for sending ping/pong messages if WebsocketKeepalive is enabled
 	WebsocketTimeout = time.Second * 60
@@ -652,7 +653,6 @@ func WsUserDataServe(listenKey string, handler WsUserDataHandler, errHandler Err
 
 // WsFutureUserDataServe serve user data handler with listen key
 func WsFutureUserDataServe(listenKey string, handler WsHandler, errHandler ErrHandler, wsConfig ...*WsConfig) (doneC, stopC chan struct{}, err error) {
-	baseFutureURL := ""
 	if len(wsConfig) > 0 {
 		baseFutureURL = wsConfig[0].Endpoint
 	}

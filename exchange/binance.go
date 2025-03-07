@@ -791,13 +791,6 @@ func (c *BinanceClient) StartUserStream() error {
 		}
 	}()
 
-	// 웹소켓 데이터 수신 콜백 함수 정의
-	wsHandler := func(event *binance.WsUserDataEvent) {
-		if event != nil {
-			fmt.Printf("Received event: %+v\n", event)
-		}
-	}
-
 	// 에러 핸들러 정의
 	errHandler := func(err error) {
 		c.Logger.WithError(err).Error("Stream error.")
@@ -809,9 +802,7 @@ func (c *BinanceClient) StartUserStream() error {
 		// NOTE: KeepAlive 옵션을 켜도 웹소켓이 1시간 후 만료된다. 핑퐁밖에는 안 해주는 것 같아보임.
 		binance.WebsocketKeepalive = true
 		futures.WebsocketKeepalive = true
-
-		doneC, stopC, err := binance.WsUserDataServe(listenKey, wsHandler, errHandler)
-
+		doneC, stopC, err := binance.WsFutureUserDataServe(listenKey, c.messageHandler, errHandler)
 		if err != nil {
 			c.Logger.WithError(err).Error("Failed to open user data ws.")
 			return
