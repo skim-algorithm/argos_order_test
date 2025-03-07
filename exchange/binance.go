@@ -193,6 +193,9 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 			fmt.Println(o)
 		}
 	}
+	// TODO Sungmin - timeout이 필요한 경우 아래와 같이 ctx에 timeout을 지정해서 context.background()를 대신한다. 지금은 따로 사용하진 않음
+	// ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// defer cancel()
 
 	// 포지션 리스크 조회 서비스 생성
 	positionRiskService := client.NewGetPositionRiskService()
@@ -211,7 +214,7 @@ func newClient(info *model.AliasInfo) *BinanceClient {
 	c.SyncTimeOffset(false)
 
 	// 바이낸스 ExchangeInfo 로드
-	exInfo, err := c.Client.NewExchangeInfoService().Do(c.ctx)
+	exInfo, err := c.Client.NewExchangeInfoService().Do(context.Background())
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to load exchange info.")
 		return nil
@@ -414,7 +417,7 @@ func (c *BinanceClient) Close() {
 }
 
 func (c *BinanceClient) SyncTimeOffset(withLogging bool) {
-	offset, err := c.Client.NewSetServerTimeService().Do(c.ctx)
+	offset, err := c.Client.NewSetServerTimeService().Do(context.Background())
 	if err != nil {
 		c.Logger.WithError(err).Info("Could not sync to server time.")
 		return
@@ -458,6 +461,28 @@ func (c *BinanceClient) GetMaxQuantity(symbol string, isMarketOrder bool) float6
 		qty = 0.0
 	}
 	return qty
+}
+
+func (c *BinanceClient) GetMinNotional(symbol string) float64 {
+	var notionalStr string
+	notionalStr = c.symbolInfo[symbol].MinNotionalFilter().Notional
+	notional, err := strconv.ParseFloat(notionalStr, 64)
+	if err != nil {
+		c.Logger.WithError(err).WithField("MinNotional", notional).Error("Failed to parse MinNotional.")
+		notional = 0.0
+	}
+	return notional
+}
+
+func (c *BinanceClient) GetStepSize(symbol string) float64 {
+	var sizeStr string
+	sizeStr = c.symbolInfo[symbol].MarketLotSizeFilter().StepSize
+	size, err := strconv.ParseFloat(sizeStr, 64)
+	if err != nil {
+		c.Logger.WithError(err).WithField("StepSize", size).Error("Failed to parse StepSize.")
+		size = 0.0
+	}
+	return size
 }
 
 // NewOrder 는 새로운 주문을 요청하고 결과를 반환한다.
@@ -533,6 +558,15 @@ func (c *BinanceClient) NewOrder(o *model.Order) ([]*futures.CreateOrderResponse
 	minQty := c.GetMinQuantity(o.Symbol, isMarketOrder)
 	maxQty := c.GetMaxQuantity(o.Symbol, isMarketOrder)
 
+	stepSize := c.GetStepSize(o.Symbol)
+	minNotional := c.GetMinNotional(o.Symbol)
+
+	if !o.ReduceOnly {
+		notionalMinQty := minNotional / price
+		for minQty < notionalMinQty {
+			minQty += stepSize
+		}
+	}
 	if o.Quantity != 0.0 {
 		o.Quantity = math.Max(minQty, o.Quantity)
 		s = s.Quantity(common.ToString(o.Quantity, qtyPrecision))
@@ -570,7 +604,7 @@ func (c *BinanceClient) NewOrder(o *model.Order) ([]*futures.CreateOrderResponse
 			}
 
 			s = s.Quantity(common.ToString(o.Quantity, qtyPrecision))
-			res, err := s.Do(c.ctx)
+			res, err := s.Do(context.Background())
 
 			// 에러 처리
 			if err != nil {
@@ -662,7 +696,7 @@ func (c *BinanceClient) CancelOrder(o *model.Cancel) ([]*futures.CancelOrderResp
 
 		if o.OrderID > 0 {
 			// OrderID가 있으면 해당 주문을 취소한다.
-			res, err := c.Client.NewCancelOrderService().Symbol(o.Symbol).OrderID(o.OrderID).Do(c.ctx)
+			res, err := c.Client.NewCancelOrderService().Symbol(o.Symbol).OrderID(o.OrderID).Do(context.Background())
 			if err != nil {
 				c.Logger.WithError(err).WithFields(log.Fields{"req": o, "res": res, "timeOffset": c.timeOffset}).Error()
 
@@ -707,6 +741,12 @@ func (c *BinanceClient) GetPosition(symbol string) *Position {
 
 // GetPositions 는 현재 계정의 포지션을 배열로 모두 반환한다.
 func (c *BinanceClient) GetPositions() []*Position {
+	// 포지션 정보 로드
+	if err := c.loadPositions(); err != nil {
+		c.Logger.WithError(err).Error("Failed to load positions.")
+		return nil
+	}
+
 	var positions []*Position
 
 	for _, val := range c.positions {
@@ -717,7 +757,7 @@ func (c *BinanceClient) GetPositions() []*Position {
 }
 
 func (c *BinanceClient) ListenKey() (string, error) {
-	res, err := c.Client.NewStartUserStreamService().Do(c.ctx)
+	res, err := c.Client.NewStartUserStreamService().Do(context.Background())
 	if err != nil {
 		c.Logger.WithError(err).Error("ListenKey failed.")
 		return "", err
@@ -726,7 +766,7 @@ func (c *BinanceClient) ListenKey() (string, error) {
 }
 
 func (c *BinanceClient) KeepAlive() error {
-	err := c.Client.NewKeepaliveUserStreamService().Do(c.ctx)
+	err := c.Client.NewKeepaliveUserStreamService().Do(context.Background())
 	if err != nil {
 		c.Logger.WithError(err).Error("KeepAlive failed.")
 		restartErr := c.RestartUserStream()
@@ -795,7 +835,7 @@ func (c *BinanceClient) StopUserStream() {
 }
 
 func (c *BinanceClient) GetBookTicker(symbol string) (ticker *futures.BookTicker, err error) {
-	list, err := c.Client.NewListBookTickersService().Symbol(symbol).Do(c.ctx)
+	list, err := c.Client.NewListBookTickersService().Symbol(symbol).Do(context.Background())
 	if err != nil {
 		return
 	}
@@ -854,7 +894,7 @@ func (c *BinanceClient) GetBalance(symbol string) (*futures.Balance, error) {
 }
 
 func (c *BinanceClient) AccountBalance() ([]*futures.Balance, error) {
-	res, err := c.Client.NewGetBalanceService().Do(c.ctx)
+	res, err := c.Client.NewGetBalanceService().Do(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -871,7 +911,7 @@ func (c *BinanceClient) GetAccount() (res *futures.Account, err error) {
 	const MAX_RETRY = 3
 
 	for i := 0; i < MAX_RETRY; i++ {
-		res, err = c.Client.NewGetAccountService().Do(c.ctx)
+		res, err = c.Client.NewGetAccountService().Do(context.Background())
 		if err == nil {
 			return // success
 		}
@@ -904,7 +944,7 @@ func (c *BinanceClient) Publish(msg interface{}) error {
 		c.Logger.WithError(err).Error("Failed to marshal.")
 		return err
 	}
-	err = c.Rds.Publish(c.ctx, c.Info.ExchangeAlias, b).Err()
+	err = c.Rds.Publish(context.Background(), c.Info.ExchangeAlias, b).Err()
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to publish.")
 		return err
@@ -913,7 +953,7 @@ func (c *BinanceClient) Publish(msg interface{}) error {
 }
 
 func (c *BinanceClient) OpenOrders(symbol string) ([]*futures.Order, error) {
-	openOrders, err := c.Client.NewListOpenOrdersService().Symbol(symbol).Do(c.ctx)
+	openOrders, err := c.Client.NewListOpenOrdersService().Symbol(symbol).Do(context.Background())
 	if err != nil {
 		c.Logger.WithError(err).WithField("timeOffset", c.timeOffset).Error()
 		return nil, err
@@ -954,7 +994,7 @@ func (c *BinanceClient) CancelAllOrders(symbol string) ([]*futures.CancelOrderRe
 
 func (c *BinanceClient) SetLeverage(symbol string, leverage int) (*futures.SymbolLeverage, error) {
 	s := c.Client.NewChangeLeverageService()
-	res, err := s.Symbol(symbol).Leverage(leverage).Do(c.ctx)
+	res, err := s.Symbol(symbol).Leverage(leverage).Do(context.Background())
 
 	if err != nil {
 		c.Logger.WithError(err).WithField("timeOffset", c.timeOffset).Error()
@@ -1108,7 +1148,7 @@ func (c *BinanceClient) handleAccountUpdate(a *AccountUpdate) error {
 
 // TODO sungmkim - update codes for NewPremiumIndexService function
 func (c *BinanceClient) GetFundingRate(symbol string) (*futures.PremiumIndex, error) {
-	res, err := c.Client.NewPremiumIndexService().Symbol(symbol).Do(c.ctx)
+	res, err := c.Client.NewPremiumIndexService().Symbol(symbol).Do(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -1197,7 +1237,7 @@ func (c *BinanceClient) loadOpenOrders() error {
 }
 
 func (c *BinanceClient) queryOrder(symbol string, orderID int64) (res *futures.Order, err error) {
-	res, err = c.Client.NewGetOrderService().Symbol(symbol).OrderID(orderID).Do(c.ctx)
+	res, err = c.Client.NewGetOrderService().Symbol(symbol).OrderID(orderID).Do(context.Background())
 	if err != nil {
 		c.Logger.WithError(err).WithFields(log.Fields{"symbol": symbol, "orderID": orderID, "timeOffset": c.timeOffset}).Error()
 		return
@@ -1210,7 +1250,7 @@ func (c *BinanceClient) queryOrder(symbol string, orderID int64) (res *futures.O
 func (c *BinanceClient) loadPositions() error {
 	c.positions = make(map[string]*Position)
 
-	res, err := c.Client.NewGetPositionRiskService().Do(c.ctx)
+	res, err := c.Client.NewGetPositionRiskService().Do(context.Background())
 	if err != nil {
 		return err
 	}
